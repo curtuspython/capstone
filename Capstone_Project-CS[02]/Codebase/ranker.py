@@ -105,6 +105,11 @@ def get_ranking_summary(ranked_candidates: list[dict]) -> str:
     """
     Build a human-readable ranking table for terminal output.
 
+    The 'Qualified' column is shown ONLY when a --min-score threshold was set
+    and at least one candidate falls below it.  When every candidate passes
+    (or no threshold was supplied) the column is hidden to keep the output
+    clean — showing ✓ for every row would be meaningless noise.
+
     Parameters
     ----------
     ranked_candidates : list[dict]
@@ -115,20 +120,32 @@ def get_ranking_summary(ranked_candidates: list[dict]) -> str:
     str
         A formatted summary string.
     """
-    lines = [
-        "\n" + "=" * 72,
-        f"{'Rank':<6}{'Candidate':<28}{'Composite':>10}  {'Overall':>8}  {'Qualified'}",
-        "-" * 72,
-    ]
+    # Only show the Qualified column if it is actually informative
+    # (i.e. at least one candidate was flagged as not qualified)
+    show_qualified = any(not c.get("qualified", True) for c in ranked_candidates)
+
+    if show_qualified:
+        header = f"{'Rank':<6}{'Candidate':<28}{'Composite':>10}  {'Overall':>8}  {'Qualified'}"
+        separator = "=" * 72
+        divider   = "-" * 72
+    else:
+        header = f"{'Rank':<6}{'Candidate':<28}{'Composite':>10}  {'Overall':>8}"
+        separator = "=" * 58
+        divider   = "-" * 58
+
+    lines = ["\n" + separator, header, divider]
 
     for c in ranked_candidates:
-        scores = c.get("scores", {})
+        scores  = c.get("scores", {})
         overall = scores.get("overall_score", "N/A")
-        qualified = "✓" if c.get("qualified", True) else "✘"
-        lines.append(
+        row = (
             f"{c['rank']:<6}{c['name'][:27]:<28}"
-            f"{c['composite_score']:>10.1f}  {str(overall):>8}  {qualified}"
+            f"{c['composite_score']:>10.1f}  {str(overall):>8}"
         )
+        if show_qualified:
+            qualified_mark = "✓" if c.get("qualified", True) else "✘"
+            row += f"  {qualified_mark}"
+        lines.append(row)
 
-    lines.append("=" * 72)
+    lines.append(separator)
     return "\n".join(lines)
