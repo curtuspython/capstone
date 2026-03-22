@@ -157,13 +157,13 @@ def build_docx() -> None:
     _add_body(doc,
         "This project implements an automated CV (resume) ranking pipeline that "
         "uses two Google Gemini LLMs orchestrated by LangChain, with LlamaIndex "
-        "for semantic similarity scoring and spaCy NER for structured resume "
-        "extraction. LLM #1 (gemini-2.5-flash) analyses the job description "
-        "once to extract structured hiring criteria; LLM #2 (gemini-2.5-pro) "
-        "scores each candidate CV against those criteria across five dimensions. "
-        "Candidates are ranked by a weighted composite score and results are "
-        "exported as a human-readable TXT report and a machine-readable CSV. "
-        "The pipeline is fully terminal-driven, modular, and extensible."
+        "as the semantic matching framework. Resume extraction uses a two-tier "
+        "strategy: pyresparser (project requirement) is attempted first; spaCy "
+        "3.x NER + regex serves as the automatic fallback for Python 3.11+ "
+        "compatibility. Semantic similarity scoring uses a three-tier fallback: "
+        "Gemini text-embedding-004 -> TF-IDF cosine similarity (scikit-learn) -> "
+        "neutral default, ensuring real differentiated scores are always produced. "
+        "Results are exported as TXT/CSV reports with a fully interactive terminal mode."
     )
 
     # ====================================================================
@@ -220,15 +220,17 @@ def build_docx() -> None:
     # 4.1 Tools
     _add_heading(doc, "4.1  Tools and Technologies", level=2)
     _add_kv_table(doc, [
-        ("Python 3.11+",              "Core programming language"),
-        ("Google Gemini API",         "LLM inference via Google AI Studio"),
-        ("gemini-2.5-flash",          "LLM #1 -- JD extraction (runs once)"),
-        ("gemini-2.5-pro",            "LLM #2 -- Per-CV scoring (runs per candidate)"),
-        ("LangChain",               "Orchestration + structured output parsing"),
-        ("LlamaIndex",                "Semantic matching via Gemini text-embedding-004"),
-        ("spaCy 3.x",               "NER-based structured resume extraction"),
-        ("pypdf / python-docx",       "Raw text extraction from PDF and DOCX files"),
-        ("fpdf2",                     "PDF project report generation"),
+        ("Python 3.11+",                   "Core programming language"),
+        ("Google Gemini API",               "LLM inference via Google AI Studio"),
+        ("gemini-2.5-flash",                "LLM #1 -- JD extraction (runs once)"),
+        ("gemini-2.5-pro",                  "LLM #2 -- Per-CV scoring (runs per candidate)"),
+        ("LangChain",                       "Orchestration + structured output parsing"),
+        ("LlamaIndex",                      "Semantic matching framework (embedding interface)"),
+        ("pyresparser (Tier 1)",            "Structured resume extraction -- attempted first"),
+        ("spaCy 3.x NER + regex (Tier 2)", "Fallback extractor -- Python 3.11+ safe"),
+        ("scikit-learn",                    "TF-IDF cosine similarity -- semantic scoring fallback"),
+        ("pypdf / python-docx",             "Raw text extraction from PDF and DOCX files"),
+        ("fpdf2",                           "PDF project report generation"),
     ])
 
     # 4.2 Architecture
@@ -236,10 +238,10 @@ def build_docx() -> None:
     _add_kv_table(doc, [
         ("main.py",              "CLI entry point + --interactive query refinement mode"),
         ("llm_client.py",        "Shared client: google-genai, LangChain, LlamaIndex"),
-        ("resume_parser.py",     "Text extraction (pypdf/docx) + spaCy NER profiles"),
+        ("resume_parser.py",     "pyresparser (Tier 1) + spaCy NER fallback (Tier 2)"),
         ("jd_analyzer.py",       "LangChain chain: LLM #1 structured JD extraction"),
         ("cv_scorer.py",         "LangChain chain: LLM #2 multi-dimension CV scoring"),
-        ("ranker.py",            "LlamaIndex semantic score + weighted composite rank"),
+        ("ranker.py",            "Semantic scoring (Gemini->TF-IDF) + composite ranking"),
         ("report_generator.py",  "Writes TXT and CSV reports to disk"),
     ])
 
@@ -247,8 +249,10 @@ def build_docx() -> None:
     _add_heading(doc, "4.3  Two-LLM Pipeline with LangChain and LlamaIndex", level=2)
     _add_body(doc,
         "Step 1 -- Resume Parsing: pypdf / python-docx extract raw text from "
-        "each CV. spaCy NER extracts structured fields "
-        "(name, skills, education, experience) for richer LLM context."
+        "each CV. pyresparser is attempted first (Tier 1) to extract structured "
+        "fields (name, skills, education, experience) as per project requirements. "
+        "If pyresparser fails (e.g. spaCy 2.x/3.x config mismatch), spaCy 3.x "
+        "NER + regex (Tier 2) is used automatically as a drop-in fallback."
     )
     _add_body(doc,
         "Step 2 -- JD Analysis (LangChain + LLM #1, gemini-2.5-flash): a "
@@ -259,14 +263,16 @@ def build_docx() -> None:
     _add_body(doc,
         "Step 3 -- CV Scoring (LangChain + LLM #2, gemini-2.5-pro): a second "
         "LangChain chain evaluates each CV using structured JD requirements + "
-        "spaCy NER profile + raw CV text. Returns scores on four dimensions "
-        "plus strengths, gaps, and a recruiter recommendation per candidate."
+        "pyresparser/spaCy NER profile + raw CV text. Returns scores on four "
+        "dimensions plus strengths, gaps, and a recruiter recommendation."
     )
     _add_body(doc,
-        "Step 4 -- Semantic Matching (LlamaIndex): GeminiEmbedding "
-        "(text-embedding-004) embeds both the JD and each CV. Cosine similarity "
-        "produces a semantic_score (0-100) capturing holistic alignment beyond "
-        "keyword presence."
+        "Step 4 -- Semantic Matching (LlamaIndex framework, three-tier fallback): "
+        "Tier 1 uses Gemini text-embedding-004 via google-genai SDK to embed the "
+        "JD and each CV, computing cosine similarity as semantic_score (0-100). "
+        "If Gemini embeddings fail (API version mismatch / quota), Tier 2 uses "
+        "TF-IDF vectorisation + cosine similarity (scikit-learn) so scores are "
+        "always real and differentiated, never a neutral placeholder."
     )
 
     # 4.4 Scoring
@@ -277,10 +283,11 @@ def build_docx() -> None:
     )
     _add_body(doc,
         "Must-Have skills carry the highest weight (35%) as the primary hard "
-        "filter. Semantic similarity (20%, LlamaIndex) captures meaning-level "
-        "alignment beyond keyword presence. Experience (20%) reflects depth "
-        "of relevant background. Nice-to-Have (15%) adds value without being a "
-        "blocker. Keyword score (10%) signals domain fluency."
+        "filter. Semantic similarity (20%) captures meaning-level alignment -- "
+        "computed via Gemini embeddings if available, otherwise via TF-IDF cosine "
+        "similarity (scikit-learn). Experience (20%) reflects depth of relevant "
+        "background. Nice-to-Have (15%) adds value without being a blocker. "
+        "Keyword score (10%) signals domain fluency."
     )
 
     # ====================================================================

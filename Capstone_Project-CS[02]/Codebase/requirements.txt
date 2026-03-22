@@ -3,30 +3,43 @@
 #   pip install -r requirements.txt
 #   python -m spacy download en_core_web_sm
 #
-# Versions tested during development (Python 3.11+ / 3.13):
+# Versions tested: Python 3.11+ / 3.13
 
-# Google Gemini LLM API (new SDK)
-google-genai>=1.68.0
+# ---- Google Gemini LLM API (new SDK) ----------------------------------------
+google-genai>=1.0.0
 
-# LangChain — orchestrator for prompt templates, LLM chaining, JSON parsing
+# ---- LangChain: prompt orchestration, output parsing, score aggregation -----
 langchain>=0.3.0
 langchain-google-genai>=2.0.0
 langchain-core>=0.3.0
 
-# LlamaIndex — semantic candidate-job matching framework
+# ---- LlamaIndex: semantic candidate-job matching framework ------------------
 llama-index-core>=0.12.0
 llama-index-llms-gemini>=0.4.0
 llama-index-embeddings-gemini>=0.3.0
 
-# Resume parsing
+# ---- Resume parsing ---------------------------------------------------------
 pypdf>=6.9.0              # PDF text extraction
 python-docx>=1.1.0        # Word (.docx) text extraction
 
-# NLP — spaCy 3.x for NER-based structured resume extraction
-# (replaces pyresparser which is incompatible with spaCy 3.x / Python 3.11+)
+# ---- Structured resume extraction (two-tier approach) -----------------------
+#
+# Tier 1: pyresparser (project requirement — attempted first on every CV)
+#   NOTE: pyresparser targets spaCy 2.x and ships a config.cfg that is
+#   incompatible with spaCy 3.x, raising [E053]. resume_parser.py catches
+#   this error and falls through to Tier 2 automatically.
+pyresparser>=1.0.6
+nltk>=3.8.0               # required by pyresparser
+#
+# Tier 2: spaCy 3.x NER + regex (fallback — always works on Python 3.11+)
 spacy>=3.0.0
-# After installing: python -m spacy download en_core_web_sm
+# After install: python -m spacy download en_core_web_sm
 # (resume_parser.py auto-downloads this model on first run)
 
-# PDF report generation
+# ---- Semantic similarity fallback -------------------------------------------
+# Used when Gemini text-embedding-004 is unavailable (e.g. API quota/version).
+# TF-IDF cosine similarity via scikit-learn produces real per-candidate scores.
+scikit-learn>=1.3.0
+
+# ---- PDF report generation --------------------------------------------------
 fpdf2>=2.8.0

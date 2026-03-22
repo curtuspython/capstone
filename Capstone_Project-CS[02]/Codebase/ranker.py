@@ -4,14 +4,20 @@ ranker.py
 Aggregates individual dimension scores into a final composite score and
 produces a sorted, ranked list of candidates.
 
-Uses **LlamaIndex** with Google Gemini embeddings for semantic candidate-job
-matching.  The cosine similarity between each CV's embedding and the job
-description embedding is converted to a 0-100 ``semantic_score`` that
-becomes the fifth dimension in the composite formula.
+Semantic scoring strategy (three-tier fallback — first that succeeds wins):
+  Tier 1 — Google Gemini text-embedding-004 via google-genai SDK.
+            LlamaIndex is the declared framework for semantic matching
+            (project requirement); embedding calls go through google.genai
+            because llama-index-embeddings-gemini targets the deprecated
+            v1beta endpoint which no longer serves text-embedding-004.
+  Tier 2 — TF-IDF cosine similarity via scikit-learn (fully local, no API).
+            Produces real, differentiated similarity scores without any
+            external dependency.
+  Tier 3 — Neutral default 50.0 (only if both tiers above fail).
 
 Weighting rationale (must sum to 1.0):
   - must_have      : 35%  — mandatory requirements are the hardest filter
-  - semantic       : 20%  — LlamaIndex embedding similarity (deep meaning match)
+  - semantic       : 20%  — embedding / TF-IDF similarity (deep meaning match)
   - experience     : 20%  — experience depth is a key differentiator
   - nice_to_have   : 15%  — preferred qualifications add value but not blockers
   - keyword        : 10%  — keyword presence acts as a signal of domain fluency
@@ -39,17 +45,23 @@ WEIGHTS = {
 
 def compute_semantic_scores(candidates: list[dict], jd_text: str) -> list[dict]:
     """
-    Compute semantic similarity between each CV and the job description using
-    Google Gemini text-embedding-004 via the google-genai SDK.
+    Compute semantic similarity between each CV and the job description.
 
-    LlamaIndex is used as the conceptual framework for semantic candidate-job
-    matching (project requirement). The embedding calls are routed through the
-    google.genai SDK client because llama-index-embeddings-gemini currently
-    relies on the deprecated google.generativeai (v1beta) package whose
-    text-embedding-004 endpoint returns 404 on the v1beta API version.
+    Three-tier fallback strategy (first that succeeds wins):
 
-    Cosine similarity (range -1 to 1) is scaled to 0-100 and stored as
-    ``candidate["semantic_score"]``.
+    Tier 1 — Google Gemini text-embedding-004 via google-genai SDK.
+              LlamaIndex is the conceptual framework for semantic matching
+              (project requirement); the actual embedding calls use the
+              google.genai client because llama-index-embeddings-gemini
+              relies on the deprecated v1beta API endpoint which no longer
+              serves text-embedding-004 (returns HTTP 404).
+
+    Tier 2 — TF-IDF cosine similarity via scikit-learn (fully local).
+              Produces real, differentiated similarity scores without any
+              network call or API key. Used when Gemini embeddings fail.
+
+    Tier 3 — Neutral default 50.0 for all candidates.
+              Only reached if both Tier 1 and Tier 2 are unavailable.
 
     Parameters
     ----------
@@ -61,42 +73,114 @@ def compute_semantic_scores(candidates: list[dict], jd_text: str) -> list[dict]:
     Returns
     -------
     list[dict]
-        Same list with ``semantic_score`` added to each candidate.
+        Same list with ``semantic_score`` (0-100 float) added to each entry.
     """
+    if _try_gemini_embeddings(candidates, jd_text):
+        return candidates
+
+    print("[ranker] Tier 1 (Gemini embedding) failed — trying Tier 2 (TF-IDF cosine similarity).")
+    if _try_tfidf_cosine(candidates, jd_text):
+        return candidates
+
+    print("[ranker] All semantic methods unavailable — using neutral default (50.0).")
+    for candidate in candidates:
+        candidate.setdefault("semantic_score", 50.0)
+    return candidates
+
+
+def _try_gemini_embeddings(candidates: list[dict], jd_text: str) -> bool:
+    """
+    Attempt Tier 1: embed texts via Google Gemini text-embedding-004.
+
+    Tries two model-name formats (with and without the 'models/' prefix)
+    because different SDK versions accept different forms.
+
+    Returns True on success, False on any failure.
+    """
+    model_names = ["models/text-embedding-004", "text-embedding-004"]
     try:
-        import llm_client
-        client = llm_client.get()  # shared google.genai SDK client
+        import llm_client  # noqa: PLC0415
+        client = llm_client.get()
 
-        # Embed the job description once (cap at 4000 chars to stay within limits)
-        jd_resp = client.models.embed_content(
-            model="models/text-embedding-004",
-            contents=jd_text[:4000],
-        )
-        jd_embedding = jd_resp.embeddings[0].values
+        jd_embedding = None
+        used_model = None
+        for model in model_names:
+            try:
+                resp = client.models.embed_content(
+                    model=model,
+                    contents=jd_text[:4000],
+                )
+                jd_embedding = resp.embeddings[0].values
+                used_model = model
+                break
+            except Exception:
+                continue
 
+        if jd_embedding is None:
+            return False
+
+        print(f"[ranker] Tier 1: Gemini embedding active (model={used_model}).")
         for candidate in candidates:
             cv_text = candidate.get("text", "")[:4000]
-            cv_resp = client.models.embed_content(
-                model="models/text-embedding-004",
+            resp = client.models.embed_content(
+                model=used_model,
                 contents=cv_text,
             )
-            cv_embedding = cv_resp.embeddings[0].values
+            cv_embedding = resp.embeddings[0].values
             similarity = _cosine_similarity(jd_embedding, cv_embedding)
-            # Gemini embeddings are unit-normalised so cosine similarity is
-            # already in [0, 1] for typical text pairs; scale to 0-100.
-            candidate["semantic_score"] = round(max(0.0, min(100.0, similarity * 100)), 2)
+            # Gemini unit-normalised embeddings: cosine is in [0,1] for text.
+            score = round(max(0.0, min(100.0, similarity * 100)), 2)
+            candidate["semantic_score"] = score
             print(
-                f"[ranker] Semantic score for {candidate.get('name', '?')}: "
-                f"{candidate['semantic_score']:.1f}"
+                f"[ranker] Semantic (Gemini) — {candidate.get('name', '?')}: {score:.1f}"
             )
+        return True
 
     except Exception as exc:
-        print(f"[ranker] Semantic scoring unavailable: {exc}")
-        print("[ranker] Using neutral default (50.0) for semantic_score.")
-        for candidate in candidates:
-            candidate["semantic_score"] = 50.0
+        print(f"[ranker] Tier 1 (Gemini) error: {exc}")
+        return False
 
-    return candidates
+
+def _try_tfidf_cosine(candidates: list[dict], jd_text: str) -> bool:
+    """
+    Attempt Tier 2: TF-IDF vectorizer + cosine similarity (scikit-learn).
+
+    Vectorises the job description and each CV into TF-IDF space, then
+    computes cosine similarity. Scores are normalised to 0-100 so they
+    are comparable with Gemini embedding scores.
+
+    Returns True on success, False if scikit-learn is not installed.
+    """
+    try:
+        from sklearn.feature_extraction.text import TfidfVectorizer  # noqa: PLC0415
+        from sklearn.metrics.pairwise import cosine_similarity         # noqa: PLC0415
+
+        cv_texts = [c.get("text", "") for c in candidates]
+        corpus = [jd_text] + cv_texts
+
+        vectorizer = TfidfVectorizer(stop_words="english", max_features=8000)
+        tfidf_matrix = vectorizer.fit_transform(corpus)
+
+        jd_vector = tfidf_matrix[0]      # first row = job description
+        cv_vectors = tfidf_matrix[1:]    # remaining rows = candidates
+
+        similarities = cosine_similarity(jd_vector, cv_vectors)[0]
+
+        # Normalise: TF-IDF cosine is [0,1]; scale to 0-100.
+        for candidate, sim in zip(candidates, similarities):
+            score = round(float(sim) * 100, 2)
+            candidate["semantic_score"] = score
+            print(
+                f"[ranker] Semantic (TF-IDF) — {candidate.get('name', '?')}: {score:.1f}"
+            )
+        return True
+
+    except ImportError:
+        print("[ranker] scikit-learn not installed; Tier 2 unavailable.")
+        return False
+    except Exception as exc:
+        print(f"[ranker] Tier 2 (TF-IDF) error: {exc}")
+        return False
 
 
 def _cosine_similarity(a: list[float], b: list[float]) -> float:

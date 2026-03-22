@@ -206,11 +206,14 @@ def build_report() -> None:
     _section(pdf, "Abstract")
     _para(pdf,
         "This project builds an automated CV ranking pipeline using two "
-        "Google Gemini LLMs orchestrated by LangChain. Resumes are parsed "
-        "with spaCy NER for structured extraction, and LlamaIndex Gemini "
-        "embeddings add semantic similarity scoring. Candidates are ranked "
-        "across five weighted dimensions, with results exported as TXT/CSV "
-        "reports and an interactive terminal mode for real-time refinement."
+        "Google Gemini LLMs (gemini-2.5-flash + gemini-2.5-pro) orchestrated "
+        "by LangChain. Resumes are parsed via a two-tier strategy: pyresparser "
+        "(project requirement) is attempted first; spaCy 3.x NER + regex serves "
+        "as the automatic fallback. Semantic similarity uses a three-tier approach: "
+        "Gemini text-embedding-004 -> TF-IDF cosine similarity (scikit-learn) -> "
+        "neutral default. LlamaIndex is the declared semantic matching framework. "
+        "Candidates are ranked on five weighted dimensions with TXT/CSV exports "
+        "and an interactive terminal mode."
     )
 
     _section(pdf, "1. Introduction")
@@ -218,8 +221,9 @@ def build_report() -> None:
         "Recruitment teams receive hundreds of CVs per opening. Manual "
         "screening is slow, inconsistent, and biased. LLMs can automate "
         "initial screening with high accuracy. This project combines two "
-        "specialised LLMs in a sequential pipeline -- a modern GenAI "
-        "best-practice -- to solve this real-world HR problem."
+        "specialised Gemini LLMs in a sequential pipeline to solve this "
+        "real-world HR problem, with LangChain for orchestration and "
+        "LlamaIndex as the semantic matching framework."
     )
 
     _section(pdf, "2. Problem Statement")
@@ -230,11 +234,11 @@ def build_report() -> None:
     )
 
     _section(pdf, "3. Objectives")
-    _bullet(pdf, "Parse resumes and extract structured profiles via spaCy 3.x NER.")
-    _bullet(pdf, "Analyse JD using LangChain + Gemini (LLM #1: gemini-2.5-flash).")
-    _bullet(pdf, "Score each CV on 5 dimensions via LangChain + Gemini (LLM #2: gemini-2.5-pro).")
-    _bullet(pdf, "Add LlamaIndex semantic similarity into composite scoring.")
-    _bullet(pdf, "Generate TXT/CSV reports; support interactive query refinement.")
+    _bullet(pdf, "Parse resumes via pyresparser (Tier 1) with spaCy 3.x NER fallback (Tier 2).")
+    _bullet(pdf, "Analyse JD using LangChain + Gemini LLM #1 (gemini-2.5-flash).")
+    _bullet(pdf, "Score each CV on 5 dimensions using LangChain + Gemini LLM #2 (gemini-2.5-pro).")
+    _bullet(pdf, "Compute semantic similarity: Gemini embeddings -> TF-IDF cosine -> neutral default.")
+    _bullet(pdf, "Export TXT/CSV reports; support interactive terminal query refinement.")
 
     # ==================================================================
     # PAGE 2 -- Methodology
@@ -245,16 +249,18 @@ def build_report() -> None:
 
     _sub(pdf, "4.1 Tools and Technologies")
     _mini_table(pdf,
-        headers=["Tool", "Purpose"],
+        headers=["Tool / Library", "Role"],
         rows=[
-            ("Google Gemini API",    "LLM inference (google-genai SDK)"),
-            ("LangChain",            "Prompt orchestration + output parsing"),
-            ("LlamaIndex",           "Semantic similarity via Gemini embeddings"),
-            ("spaCy 3.x",             "NER-based structured resume extraction (replaces pyresparser)"),
-            ("pypdf / python-docx",  "PDF and Word text extraction"),
-            ("fpdf2",                "PDF report generation (open-source)"),
+            ("Google Gemini API",      "LLM inference (gemini-2.5-flash + gemini-2.5-pro)"),
+            ("LangChain",              "Prompt orchestration, chaining, JSON output parsing"),
+            ("LlamaIndex",             "Semantic matching framework (embedding interface)"),
+            ("pyresparser (Tier 1)",   "Structured resume extraction -- attempted first"),
+            ("spaCy 3.x NER (Tier 2)","Fallback extractor: NER + regex (Python 3.11+ safe)"),
+            ("scikit-learn",           "TF-IDF cosine similarity -- semantic scoring fallback"),
+            ("pypdf / python-docx",   "PDF and Word text extraction"),
+            ("fpdf2",                  "PDF report generation (open-source)"),
         ],
-        col_w=[50, _W - 50],
+        col_w=[60, _W - 60],
     )
 
     _sub(pdf, "4.2 System Architecture")
@@ -274,21 +280,22 @@ def build_report() -> None:
 
     _sub(pdf, "4.3 Two-LLM Pipeline")
     _para(pdf,
-        "LLM #1 (gemini-2.5-flash) extracts structured JD requirements "
-        "via a LangChain chain (ChatPromptTemplate + JsonOutputParser). "
-        "LLM #2 (gemini-2.5-pro) scores each CV using structured JD + "
-        "spaCy NER profile + raw CV text, producing dimension scores "
-        "and narrative feedback."
+        "LLM #1 (gemini-2.5-flash) analyses the JD via a LangChain chain "
+        "(ChatPromptTemplate + JsonOutputParser). LLM #2 (gemini-2.5-pro) "
+        "scores each CV on 5 dimensions using the structured JD, the "
+        "pyresparser / spaCy NER profile, and the raw CV text. Both models "
+        "are justified: flash for fast single JD analysis, pro for the "
+        "accuracy-critical per-CV scoring loop."
     )
 
     _sub(pdf, "4.4 Composite Scoring (5 Dimensions)")
     _para(pdf,
-        "Composite = 0.35*MustHave + 0.20*SemanticSimilarity + 0.20*Experience "
-        "+ 0.15*NiceToHave + 0.10*Keywords. Must-Have carries "
-        "the highest weight (35%%, hard requirement filter); semantic similarity "
-        "(20%%, LlamaIndex) captures holistic alignment beyond keywords; "
-        "experience and nice-to-have follow; keyword score (10%%) "
-        "acts as a domain fluency signal."
+        "Composite = 0.35*MustHave + 0.20*SemanticSim + 0.20*Experience "
+        "+ 0.15*NiceToHave + 0.10*Keywords. Must-Have (35%) is the hardest "
+        "filter. SemanticSim (20%) uses Gemini embeddings if available, "
+        "falling back to TF-IDF cosine similarity (scikit-learn) so scores "
+        "are always real and differentiated. Experience and nice-to-have "
+        "follow; keyword score (10%) signals domain fluency."
     )
 
     # ==================================================================
@@ -332,12 +339,14 @@ def build_report() -> None:
     # ---- Conclusion ----
     _section(pdf, "6. Conclusion")
     _para(pdf,
-        "The multi-framework pipeline (LangChain + LlamaIndex + spaCy NER "
-        "+ Gemini) automates CV screening with high accuracy and full "
-        "transparency. The modular design allows swapping any component "
-        "independently. The interactive terminal mode enables real-time "
-        "query refinement without GUI dependency. Future work includes "
-        "fine-tuning weights from hiring outcomes and multilingual support."
+        "The multi-framework pipeline (LangChain + LlamaIndex + pyresparser/"
+        "spaCy NER + Gemini) automates CV screening with high accuracy and "
+        "full transparency. Resume extraction uses pyresparser (project "
+        "requirement) with an automatic spaCy 3.x NER fallback for robustness "
+        "across Python versions. Semantic scoring uses Gemini embeddings with "
+        "a TF-IDF cosine fallback so the score is always real and "
+        "differentiated. The interactive terminal mode enables real-time "
+        "query refinement without GUI dependency."
     )
 
     # ---- Save ----

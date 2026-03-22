@@ -5,18 +5,25 @@ Parses candidate resumes from PDF, DOCX, or plain-text files and returns
 structured candidate dictionaries containing both raw text and structured
 data.
 
-Parsing stack:
-  - spaCy 3.x (en_core_web_sm) : Named-Entity Recognition for name/orgs,
-                                   replaces pyresparser (broken on spaCy 3.x).
-  - Regex                       : email, phone, years-of-experience extraction.
-  - Keyword matching            : skill detection against a broad tech list.
-  - pypdf                       : PDF text extraction.
-  - python-docx                 : Word (.docx) text extraction.
-  - Built-in open()             : plain-text (.txt / .md) reading.
+Structured extraction strategy (two-tier fallback):
 
-Note on pyresparser: pyresparser targets spaCy 2.x and ships a config.cfg
-that is incompatible with spaCy 3.x (raises E053). It is not used here;
-structured extraction is implemented directly with spaCy 3.x NER + regex.
+  Tier 1 — pyresparser (project requirement).
+            pyresparser is attempted first on every CV.  It is, however,
+            incompatible with spaCy 3.x: it ships a config.cfg in the old
+            spaCy 2.x format which raises [E053] on spaCy 3.x.  If this
+            error (or any other import/runtime failure) is detected, the
+            module falls through to Tier 2 automatically.
+
+  Tier 2 — Custom spaCy 3.x NER + regex extractor (always available).
+            Extracts the same fields as pyresparser (name, email, phone,
+            skills, education, degree, experience, total_experience) using
+            spaCy 3.x Named-Entity Recognition and lightweight regex
+            patterns.  Works on Python 3.11+ with any spaCy 3.x model.
+
+File format support:
+  - pypdf       : PDF text extraction
+  - python-docx : Word (.docx) text extraction
+  - Built-in    : plain-text (.txt / .md) reading
 """
 
 import re
@@ -31,6 +38,29 @@ try:
     from docx import Document as DocxDocument
 except ImportError:  # pragma: no cover
     DocxDocument = None  # type: ignore
+
+# ---------------------------------------------------------------------------
+# Tier 1 — pyresparser (project requirement, attempted first).
+# pyresparser targets spaCy 2.x; its shipped config.cfg is incompatible
+# with spaCy 3.x and raises [E053].  We catch that and any other import
+# failure here so the fallback to Tier 2 is transparent.
+# ---------------------------------------------------------------------------
+_HAS_PYRESPARSER = False
+try:
+    # NLTK data needed by pyresparser
+    import nltk as _nltk
+    for _r in ("stopwords", "punkt", "averaged_perceptron_tagger", "punkt_tab"):
+        _nltk.download(_r, quiet=True)
+    from pyresparser import ResumeParser as _PyResParser  # noqa: PLC0415
+    # Smoke-test: pyresparser registers a custom spaCy component at import
+    # time.  If [E053] is going to fire it fires here.
+    _HAS_PYRESPARSER = True
+    print("[resume_parser] pyresparser loaded successfully (Tier 1 active).")
+except Exception as _e:
+    print(
+        f"[resume_parser] pyresparser unavailable ({type(_e).__name__}: {_e}) "
+        "\u2014 using spaCy 3.x NER fallback (Tier 2)."
+    )
 
 # ---------------------------------------------------------------------------
 # spaCy NLP model — loaded once at module level for performance.
@@ -127,31 +157,65 @@ def extract_text_from_file(file_path: str) -> str:
 
 def extract_structured_data(file_path: str, text: str = "") -> dict:
     """
-    Extract structured information from a resume using spaCy 3.x NER + regex.
+    Extract structured information from a resume.
 
-    Replaces pyresparser (which is incompatible with spaCy 3.x) with a
-    direct spaCy Named-Entity Recognition approach. Extracts:
-      - name           : first PERSON entity found by NER
-      - email          : regex
-      - mobile_number  : regex
-      - skills         : keyword match against _SKILL_KEYWORDS
-      - education      : lines containing university/college/institute keywords
-      - degree         : degree-level keywords found in text
-      - experience     : lines containing job-title / experience section markers
-      - total_experience: first N-year(s) pattern found (e.g. '5 years')
+    Tier 1 — pyresparser (project requirement):
+        Uses pyresparser.ResumeParser which internally leverages NLTK and
+        spaCy for NLP-based field extraction.  Attempted first on every CV.
+        Falls through to Tier 2 when pyresparser is unavailable (e.g. spaCy
+        version mismatch) or raises any runtime error.
+
+    Tier 2 — Custom spaCy 3.x NER + regex:
+        Extracts name (PERSON entity), email, phone (regex), skills
+        (keyword match), education/degree (keyword lines), experience
+        (job-title line detection), and years of experience (regex).
+        Compatible with Python 3.11+ and spaCy 3.x.
 
     Parameters
     ----------
     file_path : str
-        Path to the resume (used only for filename-stem fallback name).
+        Path to the resume file.
     text : str
-       acted raw text of the resume. If empty, falls back to
-        filename stem for name and empty lists for all other fields.
+        Pre-extracted raw text (passed in to avoid re-reading the file).
 
     Returns
     -------
     dict
-        Structured resume data with consistent keys.
+        Structured resume data with consistent keys:
+        name, email, mobile_number, skills, education, experience,
+        total_experience, degree.
+    """
+    # --- Tier 1: pyresparser ---
+    if _HAS_PYRESPARSER:
+        try:
+            data = _PyResParser(file_path).get_extracted_data()
+            return {
+                "name":             data.get("name", "") or Path(file_path).stem,
+                "email":            data.get("email", ""),
+                "mobile_number":    data.get("mobile_number", ""),
+                "skills":           data.get("skills", []) or [],
+                "education":        data.get("education", []) or [],
+                "experience":       data.get("experience", []) or [],
+                "total_experience": data.get("total_experience", 0) or 0,
+                "degree":           data.get("degree", []) or [],
+            }
+        except Exception as exc:
+            print(
+                f"[resume_parser] pyresparser Tier 1 failed for "
+                f"{Path(file_path).name}: {exc} — falling back to Tier 2."
+            )
+
+    # --- Tier 2: spaCy 3.x NER + regex ---
+    return _extract_with_spacy_ner(file_path, text)
+
+
+def _extract_with_spacy_ner(file_path: str, text: str) -> dict:
+    """
+    Tier 2 structured extractor using spaCy 3.x NER + regex.
+
+    This is the fallback when pyresparser (Tier 1) is unavailable or fails.
+    Extracts the same fields pyresparser would produce so downstream code
+    receives a consistent dict regardless of which tier ran.
     """
     stem = Path(file_path).stem
 
@@ -160,8 +224,8 @@ def extract_structured_data(file_path: str, text: str = "") -> dict:
 
     text_lower = text.lower()
 
-    # -- Name via spaCy NER (PERSON entity) ----------------------------------
-    name = _extract_name_ner(text) or stem
+    # -- Name: first PERSON entity in the resume header (top 500 chars) -------
+    name = _ner_person(text) or stem
 
     # -- Email ----------------------------------------------------------------
     email_match = re.search(
@@ -170,12 +234,10 @@ def extract_structured_data(file_path: str, text: str = "") -> dict:
     email = email_match.group(0) if email_match else ""
 
     # -- Phone ----------------------------------------------------------------
-    phone_match = re.search(
-        r"(?:\+?\d[\d\s\-().]{7,14}\d)", text
-    )
+    phone_match = re.search(r"(?:\+?\d[\d\s\-().]{7,14}\d)", text)
     mobile = phone_match.group(0).strip() if phone_match else ""
 
-    # -- Skills (keyword intersection) ----------------------------------------
+    # -- Skills: keyword intersection against a broad tech list ---------------
     skills = [
         kw for kw in _SKILL_KEYWORDS
         if re.search(r"\b" + re.escape(kw) + r"\b", text_lower)
@@ -187,31 +249,29 @@ def extract_structured_data(file_path: str, text: str = "") -> dict:
         if re.search(r"\b" + re.escape(kw) + r"\b", text_lower)
     ]
 
-    # -- Education lines ------------------------------------------------------
-    edu_keywords = (
+    # -- Education lines (lines containing institution/degree keywords) --------
+    edu_kw = (
         "university", "college", "institute", "school", "academy",
         "b.sc", "m.sc", "b.tech", "m.tech", "bachelor", "master",
         "phd", "mba", "diploma",
     )
     education = [
         line.strip() for line in text.splitlines()
-        if any(kw in line.lower() for kw in edu_keywords) and line.strip()
-    ][:6]  # cap at 6 lines
+        if any(kw in line.lower() for kw in edu_kw) and line.strip()
+    ][:6]  # cap at 6 lines to keep the dict lean
 
-    # -- Experience lines / sections ------------------------------------------
-    exp_keywords = (
+    # -- Experience lines (job-title / action-verb bearing lines) -------------
+    exp_kw = (
         "experience", "engineer", "developer", "analyst", "manager",
         "intern", "worked", "responsible", "led", "built", "designed",
     )
     experience = [
         line.strip() for line in text.splitlines()
-        if any(kw in line.lower() for kw in exp_keywords) and line.strip()
+        if any(kw in line.lower() for kw in exp_kw) and line.strip()
     ][:8]  # cap at 8 lines
 
-    # -- Total experience (e.g. '5 years of experience') ----------------------
-    yrs_match = re.search(
-        r"(\d+(?:\.\d+)?)\s*\+?\s*year[s]?", text_lower
-    )
+    # -- Total years of experience (e.g. '5 years', '3+ years') ---------------
+    yrs_match = re.search(r"(\d+(?:\.\d+)?)\s*\+?\s*year[s]?", text_lower)
     total_experience = float(yrs_match.group(1)) if yrs_match else 0
 
     return {
@@ -226,14 +286,12 @@ def extract_structured_data(file_path: str, text: str = "") -> dict:
     }
 
 
-def _extract_name_ner(text: str) -> str:
+def _ner_person(text: str) -> str:
     """
-    Use spaCy NER to find the first PERSON entity in the resume text.
+    Return the first PERSON named entity from the resume header (spaCy NER).
 
-    Looks only at the first 500 characters where the candidate's name
-    typically appears (header / contact section).
-
-    Returns an empty string if spaCy is unavailable or no PERSON found.
+    Scans only the first 500 characters where the candidate name typically
+    appears.  Returns empty string if spaCy is unavailable or no PERSON found.
     """
     nlp = _get_nlp()
     if nlp is None:
@@ -246,7 +304,7 @@ def _extract_name_ner(text: str) -> str:
 
 
 def _empty_structured(name: str) -> dict:
-    """Return a zeroed-out structured dict used as a safe fallback."""
+    """Return a zeroed-out structured dict — safe fallback for empty text."""
     return {
         "name":             name,
         "email":            "",

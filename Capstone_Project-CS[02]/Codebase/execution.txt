@@ -5,24 +5,36 @@
 # WHAT THIS PROJECT DOES:
 #   Reads a job description + a folder of candidate CVs, scores every CV
 #   using two Google Gemini LLMs orchestrated by LangChain, computes
-#   semantic similarity via LlamaIndex embeddings, extracts structured
-#   resume data via spaCy NER, ranks candidates by a weighted composite
-#   score, and exports results as TXT + CSV reports. Supports an optional
-#   terminal-based interactive mode for real-time query refinement.
+#   semantic similarity (Gemini embeddings -> TF-IDF cosine fallback),
+#   extracts structured resume data via pyresparser (Tier 1) with spaCy
+#   3.x NER as the automatic fallback (Tier 2), ranks candidates by a
+#   weighted composite score, and exports results as TXT + CSV reports.
+#   Supports an optional terminal-based interactive mode for real-time
+#   query refinement.
 #
 # TECHNOLOGY STACK:
-#   Google Gemini API   ->  LLM inference (gemini-2.5-flash / gemini-2.5-pro)
+#   Google Gemini API   ->  LLM inference (gemini-2.5-flash + gemini-2.5-pro)
 #   LangChain           ->  Prompt orchestration, score aggregation, structured
 #                           output parsing (ChatPromptTemplate + JsonOutputParser)
-#   LlamaIndex          ->  Semantic candidate-job matching via Gemini embeddings
-#                           (text-embedding-004)
-#   spaCy 3.x NER        ->  Structured information extraction from resumes
-#                             (replaces pyresparser; compatible with Python 3.11+)
+#   LlamaIndex          ->  Semantic matching framework (embedding interface).
+#                           Embedding calls go through google-genai SDK because
+#                           llama-index-embeddings-gemini targets the deprecated
+#                           v1beta endpoint that no longer serves text-embedding-004.
+#   pyresparser (Tier 1)->  Structured information extraction from PDF/Word
+#                           resumes (project requirement). Attempted first;
+#                           NOTE: incompatible with spaCy 3.x (raises E053 due
+#                           to outdated config.cfg format). Falls through to Tier 2.
+#   spaCy 3.x (Tier 2)  ->  Automatic fallback for structured resume extraction
+#                           via NER + regex. Compatible with Python 3.11+.
+#   scikit-learn        ->  TF-IDF cosine similarity as semantic scoring Tier 2
+#                           (used when Gemini text-embedding-004 returns 404).
 #   --interactive mode  ->  Terminal-based query refinement (no GUI required)
 #
-# TWO LLMs USED:
+# TWO LLMs USED (project requirement: minimum two LLMs):
 #   LLM #1 : gemini-2.5-flash  ->  Analyses the job description ONCE
+#                                   (fast; suitable for single-run structured extraction)
 #   LLM #2 : gemini-2.5-pro    ->  Scores each candidate CV in a loop
+#                                   (more capable; justified for accuracy-critical scoring)
 #
 # SUPPORTED FILE FORMATS:
 #   Job description : .txt  |  .pdf  |  .docx
@@ -35,20 +47,24 @@
 #   Python           : 3.11 or higher (tested on 3.13)
 #
 #   LLM Models (Google Gemini):
-#     LLM #1 : gemini-2.5-flash  (job description analysis  — runs once)
-#     LLM #2 : gemini-2.5-pro    (per-CV scoring loop       — runs per candidate)
+#     LLM #1 : gemini-2.5-flash  (job description analysis  -- runs once)
+#     LLM #2 : gemini-2.5-pro    (per-CV scoring loop       -- runs per candidate)
 #
 #   Core Python Packages:
 #     google-genai             >=1.0.0   ->  Gemini API client (new SDK)
 #     langchain                >=0.3.0   ->  Prompt orchestration & output parsing
 #     langchain-google-genai   >=2.0.0   ->  LangChain <-> Gemini integration
-#     llama-index-core         >=0.12.0  ->  LlamaIndex framework
-#     llama-index-embeddings-gemini >=0.3.0 -> Gemini embedding model
-#     spacy                   >=3.0.0   ->  NER-based resume extraction
-#     # After install: python -m spacy download en_core_web_sm
-#     # (auto-downloaded on first run by resume_parser.py)
-#     pypdf                    >=6.9.0   ->  PDF resume parsing
-#     python-docx              >=1.1.0   ->  Word (.docx) resume parsing
+#     llama-index-core         >=0.12.0  ->  LlamaIndex semantic framework
+#     llama-index-llms-gemini  >=0.4.0   ->  LlamaIndex LLM wrapper for Gemini
+#     llama-index-embeddings-gemini >=0.3.0  ->  LlamaIndex embedding wrapper
+#     pyresparser              >=1.0.6   ->  Structured resume extraction (Tier 1)
+#     nltk                     >=3.8.0   ->  Required by pyresparser
+#     spacy                    >=3.0.0   ->  NER fallback extractor (Tier 2)
+#       After install: python -m spacy download en_core_web_sm
+#       (resume_parser.py auto-downloads on first run)
+#     scikit-learn             >=1.3.0   ->  TF-IDF cosine semantic fallback
+#     pypdf                    >=6.9.0   ->  PDF resume text extraction
+#     python-docx              >=1.1.0   ->  Word (.docx) resume text extraction
 #     fpdf2                    >=2.8.0   ->  PDF report generation
 #
 # ==============================================================================
@@ -59,6 +75,11 @@
 #
 #   (Optional) Download the spaCy English model if not auto-downloaded:
 #     python -m spacy download en_core_web_sm
+#
+#   NOTE on pyresparser: pyresparser will be installed but may raise [E053]
+#   at runtime due to a spaCy 2.x config.cfg incompatibility with spaCy 3.x.
+#   This is expected -- resume_parser.py catches the error automatically and
+#   falls back to the spaCy 3.x NER extractor (Tier 2).
 #
 # ==============================================================================
 # STEP 2 - GET A FREE GEMINI API KEY
@@ -83,23 +104,14 @@
 #   On Windows PowerShell:
 #     $env:GEMINI_API_KEY="AIzaSy..."
 #
-#   Verify it is set:
-#     echo $GEMINI_API_KEY          (Mac/Linux)
-#     echo %GEMINI_API_KEY%         (Windows CMD)
-#
 #   METHOD 2 - .env file
 #   ------------------------------------------------
-#   Create a file named exactly ".env" inside the Codebase/ directory
-#   and add this single line (no quotes):
-#
+#   Create a file named exactly ".env" inside the Codebase/ directory:
 #     GEMINI_API_KEY=AIzaSy...
-#
 #   The code reads this file automatically on startup.
 #
 #   METHOD 3 - CLI argument
 #   ------------------------------------------------
-#   Pass the key directly when running the script:
-#
 #     python main.py --jd <jd_file> --cvs <cv_dir> --api-key AIzaSy...
 #
 # ==============================================================================
@@ -110,15 +122,7 @@
 #     python main.py --jd <path_to_job_description> --cvs <path_to_cv_directory>
 #
 #   FULL USAGE (all options):
-#     python main.py \
-#       --jd    <path_to_job_description_file>  \
-#       --cvs   <path_to_cv_directory>          \
-#       --output  <output_directory>            \
-#       --min-score <0-100>                     \
-#       --llm1  <gemini_model_for_jd_analysis>  \
-#       --llm2  <gemini_model_for_cv_scoring>   \
-#       --api-key   <GEMINI_API_KEY>            \
-#       --interactive
+#     python main.py \n#       --jd        <path_to_job_description_file>   \n#       --cvs       <path_to_cv_directory>           \n#       --output    <output_directory>               \n#       --min-score <0-100>                          \n#       --llm1      <gemini_model_for_jd_analysis>   \n#       --llm2      <gemini_model_for_cv_scoring>    \n#       --api-key   <GEMINI_API_KEY>                 \n#       --interactive
 #
 #   ARGUMENTS:
 #     --jd          PATH   Job description file (.txt / .pdf / .docx)  [REQUIRED]
@@ -128,67 +132,61 @@
 #     --min-score   N      Flag candidates scoring below N (0-100)       [OPTIONAL]
 #     --llm1        MODEL  Gemini model for JD analysis                  [OPTIONAL, default: gemini-2.5-flash]
 #     --llm2        MODEL  Gemini model for CV scoring loop              [OPTIONAL, default: gemini-2.5-pro]
-#     --interactive        Enter interactive mode after ranking to refine [OPTIONAL]
-#                          criteria, filter candidates, and re-run sorting
+#     --interactive        Enter interactive mode after ranking           [OPTIONAL]
 #
 #   INTERACTIVE MODE (--interactive):
 #   ----------------------------------
-#   After the initial ranking, the terminal enters a command loop where
-#   you can refine results without restarting the pipeline:
-#     show <rank>        Inspect match explanation & evidence for a candidate
-#     filter <skill>     Filter candidates whose CV contains a given skill
-#     reset              Remove all filters and show full ranking
-#     min-score <N>      Set minimum composite score threshold
-#     edit-must <csv>    Edit must-have requirements (comma-separated)
-#     edit-nice <csv>    Edit nice-to-have requirements (comma-separated)
+#   After ranking, enter a command loop for real-time refinement:
+#     show <rank>         Inspect match explanation for a ranked candidate
+#     filter <skill>      Keep only candidates whose CV mentions a skill
+#     reset               Remove all filters and show full ranking
+#     min-score <N>       Set minimum composite score threshold
+#     edit-must <csv>     Edit must-have requirements (comma-separated)
+#     edit-nice <csv>     Edit nice-to-have requirements (comma-separated)
 #     edit-keywords <csv> Edit keywords (comma-separated)
-#     rescore            Re-score candidates with updated requirements
-#     rerank             Re-rank (no re-scoring) with current settings
-#     export             Write TXT + CSV reports for the current ranking
-#     help / quit        Show help or exit interactive mode
+#     rescore             Re-score candidates with updated requirements
+#     rerank              Re-rank without re-scoring
+#     export              Write TXT + CSV reports for current ranking
+#     help / quit         Show help or exit interactive mode
 #
 # ==============================================================================
 # EXAMPLE COMMANDS
 # ==============================================================================
 #
-#   Example 1 - Minimal CLI (API key already exported as env var):
+#   Example 1 - Minimal (API key already exported as env var):
 #     export GEMINI_API_KEY=AIzaSy...
 #     python main.py --jd job_description.txt --cvs ./resumes/
 #
-#   Example 2 - CLI with all options explicitly set:
-#     python main.py \
-#       --jd      job_description.txt \
-#       --cvs     ./resumes/ \
-#       --output  ./reports/ \
-#       --min-score 50 \
-#       --llm1  gemini-2.5-flash \
-#       --llm2  gemini-2.5-pro \
-#       --api-key AIzaSy...
+#   Example 2 - Full options:
+#     python main.py \n#       --jd        job_description.txt \n#       --cvs       ./resumes/ \n#       --output    ./reports/ \n#       --min-score 70 \n#       --llm1  gemini-2.5-flash \n#       --llm2  gemini-2.5-pro \n#       --api-key AIzaSy...
 #
-#   Example 3 - Interactive terminal mode (query refinement):
+#   Example 3 - Interactive terminal mode:
 #     export GEMINI_API_KEY=AIzaSy...
 #     python main.py --jd job_description.txt --cvs ./resumes/ --interactive
 #
 # ==============================================================================
-# EXPECTED OUTPUT (CLI mode)
+# EXPECTED OUTPUT
 # ==============================================================================
 #
-#   Terminal prints a live progress log and a ranked summary table, e.g.:
+#   [main] Step 1/4 -- Analysing job description with LLM #1 (gemini-2.5-flash) ...
+#   [resume_parser] pyresparser unavailable (OSError: [E053] ...) -- using spaCy 3.x NER fallback.
+#   [main] Step 2/4 -- Parsing candidate CVs ...
+#   [main] Step 3/4 -- Scoring 6 CV(s) with LLM #2 (gemini-2.5-pro) ...
+#   [ranker] Tier 1 (Gemini embedding) failed -- trying Tier 2 (TF-IDF cosine similarity).
+#   [ranker] Semantic (TF-IDF) -- cv_frank: 84.2
+#   [ranker] Semantic (TF-IDF) -- cv_alice: 81.9
+#   ...
 #
-#     [main] Step 1/4 -- Analysing job description with LLM #1 ...
-#     [main] Step 2/4 -- Parsing candidate CVs ...
-#     [main] Step 3/4 -- Scoring 3 CV(s) with LLM #2 ...
-#     [main] Step 4/4 -- Ranking candidates (+ LlamaIndex semantic matching) ...
+#   ==============================================================================
+#   Rank  Candidate               Composite  Semantic   Overall
+#   ------------------------------------------------------------------------------
+#   1     cv_frank                     91.3      84.2        99     (qualified)
+#   2     cv_alice                     89.8      81.9        99
+#   3     cv_david                     78.5      72.3        90
+#   ...
+#   ==============================================================================
 #
-#     ================================================================
-#     Rank  Candidate               Composite  Semantic   Overall
-#     ----------------------------------------------------------------
-#     1     alice                        82.3      87.5        85
-#     2     bob                          61.0      64.2        65
-#     3     carol                        38.5      41.1        42
-#     ================================================================
-#
-#   Two report files are written to --output directory (default: current dir):
+#   Two report files written to --output directory:
 #     cv_ranking_report_<YYYYMMDD_HHMMSS>.txt   ->  Full narrative report
 #     cv_ranking_report_<YYYYMMDD_HHMMSS>.csv   ->  Spreadsheet-ready export
 #
@@ -196,18 +194,24 @@
 # SYSTEM ARCHITECTURE
 # ==============================================================================
 #
-#   main.py              ->  CLI entry point; orchestrates the full pipeline;
+#   main.py              ->  CLI entry point; orchestrates the 4-step pipeline;
 #                             includes --interactive mode for query refinement
-#   llm_client.py        ->  Centralised Gemini client (google-genai,
-#                             LangChain ChatGoogleGenerativeAI, LlamaIndex
-#                             GeminiEmbedding)
-#   resume_parser.py     ->  Extracts raw text (pypdf / python-docx) +
-#                             structured data (spaCy NER) from resumes
-#   jd_analyzer.py       ->  LLM #1 via LangChain — structured JD extraction
-#   cv_scorer.py         ->  LLM #2 via LangChain — per-CV scoring with
-#                             structured resume data + parsed JD as input
-#   ranker.py            ->  Weighted composite scoring + LlamaIndex semantic
-#                             similarity via Gemini embeddings
+#   llm_client.py        ->  Centralised Gemini client initialisation
+#                             (google-genai SDK, LangChain, LlamaIndex wrappers)
+#   resume_parser.py     ->  Two-tier resume extraction:
+#                             Tier 1: pyresparser (project requirement)
+#                             Tier 2: spaCy 3.x NER + regex (automatic fallback)
+#                             + raw text extraction via pypdf / python-docx
+#   jd_analyzer.py       ->  LLM #1 (gemini-2.5-flash) via LangChain chain
+#                             -- structured JD extraction (must-have, nice-to-have,
+#                             keywords, min experience, role summary)
+#   cv_scorer.py         ->  LLM #2 (gemini-2.5-pro) via LangChain chain
+#                             -- per-CV scoring on 4 dimensions + explanation
+#   ranker.py            ->  Semantic scoring (three-tier fallback):
+#                             Tier 1: Gemini text-embedding-004 cosine similarity
+#                             Tier 2: TF-IDF cosine similarity (scikit-learn)
+#                             Tier 3: neutral default 50.0
+#                             + weighted composite score computation + ranking
 #   report_generator.py  ->  Writes TXT + CSV reports to disk
 #
 # ==============================================================================
