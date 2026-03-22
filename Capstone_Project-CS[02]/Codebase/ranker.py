@@ -151,16 +151,21 @@ def _try_gemini_embeddings(candidates: list[dict], jd_text: str) -> bool:
     """
     Tier 2: embed texts via Google Gemini text-embedding-004 directly.
 
-    Uses the google-genai SDK client (not LlamaIndex) to call the Gemini
-    embeddings API.  Tries two model-name formats because different SDK
-    versions accept different forms.
+    Uses ``llm_client.get_embed_client()`` -- a google-genai Client instance
+    initialised with ``http_options={'api_version': 'v1'}`` -- to bypass the
+    v1beta routing problem caused by LlamaIndex importing google.generativeai.
+    text-embedding-004 is only available on the stable v1 API, not v1beta.
+
+    Tries two model-name formats because different SDK versions accept different
+    forms ('models/text-embedding-004' vs 'text-embedding-004').
 
     Returns True on success, False on any failure.
     """
     model_names = ["models/text-embedding-004", "text-embedding-004"]
     try:
         import llm_client  # noqa: PLC0415
-        client = llm_client.get()
+        # Use the v1-pinned embed client to avoid LlamaIndex v1beta contamination
+        client = llm_client.get_embed_client()
 
         jd_embedding = None
         used_model = None
@@ -181,14 +186,19 @@ def _try_gemini_embeddings(candidates: list[dict], jd_text: str) -> bool:
             return False
 
         print(f"[ranker] Tier 2: Gemini SDK embedding active (model={used_model}).")
+        raw_sims: list[float] = []
+        cv_embeddings: list[list[float]] = []
         for candidate in candidates:
             cv_text = candidate.get("text", "")[:4000]
-            resp = client.models.embed_content(
-                model=used_model, contents=cv_text
-            )
-            cv_embedding = resp.embeddings[0].values
-            similarity = _cosine_similarity(jd_embedding, cv_embedding)
-            score = round(max(0.0, min(100.0, similarity * 100)), 2)
+            resp = client.models.embed_content(model=used_model, contents=cv_text)
+            cv_emb = resp.embeddings[0].values
+            cv_embeddings.append(cv_emb)
+            raw_sims.append(_cosine_similarity(jd_embedding, cv_emb))
+
+        # Normalise to 0-100 (Gemini embeddings are unit-normalised so cosine
+        # naturally sits in [0.6, 0.95] for relevant text pairs)
+        for candidate, sim in zip(candidates, raw_sims):
+            score = round(max(0.0, min(100.0, sim * 100)), 2)
             candidate["semantic_score"] = score
             print(
                 f"[ranker] Semantic (Gemini) -- "
@@ -206,8 +216,20 @@ def _try_tfidf_cosine(candidates: list[dict], jd_text: str) -> bool:
     Tier 3: TF-IDF vectoriser + cosine similarity (scikit-learn).
 
     Vectorises the job description and each CV in TF-IDF space, then
-    computes cosine similarity.  Scores are normalised to 0-100 to be
-    comparable with embedding-based scores.
+    computes cosine similarity between the JD vector and each CV vector.
+
+    **Normalisation note:**
+    Raw TF-IDF cosine values for JD-vs-CV pairs typically fall in [0.05, 0.35]
+    because two real documents share vocabulary but are never identical.  A
+    direct ``sim * 100`` mapping would produce scores of 5-35, which is
+    systematically lower than LLM scores (0-100) and Gemini embedding scores
+    (60-95).  Mixing these without normalisation biases the composite score.
+
+    Solution: batch-relative min-max normalisation maps the worst match in
+    the current batch to 10 and the best match to 100, preserving relative
+    ranking while putting TF-IDF scores in the same range as other dimensions.
+    If all candidates have equal similarity (degenerate case), every candidate
+    receives a neutral score of 55.0.
 
     Returns True on success, False if scikit-learn is not installed.
     """
@@ -224,13 +246,28 @@ def _try_tfidf_cosine(candidates: list[dict], jd_text: str) -> bool:
         jd_vector  = tfidf_matrix[0]   # first row = job description
         cv_vectors = tfidf_matrix[1:]  # remaining rows = candidates
 
-        similarities = cosine_similarity(jd_vector, cv_vectors)[0]
+        raw_sims = cosine_similarity(jd_vector, cv_vectors)[0].tolist()
 
-        for candidate, sim in zip(candidates, similarities):
-            score = round(float(sim) * 100, 2)
+        # Batch min-max normalise to [10, 100] so TF-IDF scores are comparable
+        # with LLM and embedding scores used in the weighted composite formula.
+        min_sim = min(raw_sims)
+        max_sim = max(raw_sims)
+        score_range = max_sim - min_sim
+
+        normalised: list[float] = []
+        if score_range < 1e-9:
+            # Degenerate case: all CVs have the same similarity to the JD
+            normalised = [55.0] * len(raw_sims)
+        else:
+            for sim in raw_sims:
+                # Scale to [10, 100]: worst gets 10, best gets 100
+                norm = 10.0 + ((sim - min_sim) / score_range) * 90.0
+                normalised.append(round(norm, 2))
+
+        for candidate, score in zip(candidates, normalised):
             candidate["semantic_score"] = score
             print(
-                f"[ranker] Semantic (TF-IDF) -- "
+                f"[ranker] Semantic (TF-IDF, normalised) -- "
                 f"{candidate.get('name', '?')}: {score:.1f}"
             )
         return True

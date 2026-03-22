@@ -3,15 +3,20 @@ llm_client.py
 -------------
 Centralised Google Gemini client initialisation providing three access layers:
 
-  1. google-genai SDK client  – direct Gemini API (used where fine-grained
-     control is needed, e.g. thinking_budget).
-  2. LangChain ChatGoogleGenerativeAI – orchestrator for prompt-based
-     matching, score aggregation, and structured output parsing.
-  3. LlamaIndex Gemini embeddings – semantic candidate-job matching via
-     vector similarity.
+  1. google-genai SDK client (v1beta)  -- general LLM inference (generate_content).
+  2. google-genai SDK client (v1)      -- dedicated embedding client.
+     Embedding calls (embed_content with text-embedding-004) require the
+     stable v1 API endpoint.  LlamaIndex imports google.generativeai which
+     sets global state that causes embed_content to route to v1beta where
+     text-embedding-004 returns 404.  A separate Client instance with
+     http_options={'api_version': 'v1'} bypasses this problem.
+  3. LangChain ChatGoogleGenerativeAI -- prompt orchestration, score
+     aggregation, and structured output parsing.
+  4. LlamaIndex GeminiEmbedding       -- semantic matching framework
+     (project requirement, attempted first; falls back to Tier 2 client).
 
 Pattern:
-  - main.py / app.py calls ``llm_client.init(api_key)`` once at startup.
+  - main.py calls ``llm_client.init(api_key)`` once at startup.
   - Other modules call the appropriate getter to retrieve a shared instance.
 """
 
@@ -19,7 +24,8 @@ from google import genai
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 # Module-level state; populated by init()
-_client: genai.Client | None = None
+_client: genai.Client | None = None        # default SDK client (v1beta)
+_embed_client: genai.Client | None = None  # v1 client dedicated to embed_content
 _api_key: str | None = None
 _langchain_llms: dict = {}
 _llama_embed = None
@@ -29,6 +35,13 @@ def init(api_key: str) -> None:
     """
     Initialise all Gemini clients with the given API key.
 
+    Creates two genai.Client instances:
+      - Default client (v1beta): used for generate_content (LLM inference).
+      - Embedding client (v1): used for embed_content (text-embedding-004).
+        LlamaIndex imports google.generativeai at module level which sets
+        global state that routes embed_content to v1beta where the model
+        returns 404.  A dedicated Client with api_version='v1' bypasses it.
+
     Must be called once before any LLM calls are made.
 
     Parameters
@@ -36,19 +49,32 @@ def init(api_key: str) -> None:
     api_key : str
         A valid Google Gemini API key (starts with 'AIza...').
     """
-    global _client, _api_key
+    global _client, _embed_client, _api_key
     _api_key = api_key
+    # Default client -- used for chat/generation (v1beta endpoint is fine here)
     _client = genai.Client(api_key=api_key)
+    # Dedicated embedding client -- force v1 to avoid LlamaIndex v1beta contamination
+    try:
+        _embed_client = genai.Client(
+            api_key=api_key,
+            http_options={"api_version": "v1"},
+        )
+        print("[llm_client] Embedding client (v1) initialised.")
+    except Exception as exc:
+        print(f"[llm_client] Embedding client (v1) init failed: {exc}; will use default client.")
+        _embed_client = _client
 
 
 def get() -> genai.Client:
     """
-    Return the raw google-genai SDK client.
+    Return the default google-genai SDK client (v1beta endpoint).
+
+    Used for LLM generate_content calls.  Do NOT use this for embed_content
+    -- use get_embed_client() instead to avoid v1beta 404 errors.
 
     Returns
     -------
     genai.Client
-        The shared client instance.
 
     Raises
     ------
@@ -61,6 +87,28 @@ def get() -> genai.Client:
             "Call llm_client.init(api_key) in main.py first."
         )
     return _client
+
+
+def get_embed_client() -> genai.Client:
+    """
+    Return the v1-pinned google-genai SDK client for embed_content calls.
+
+    text-embedding-004 only exists on the stable v1 API endpoint.  LlamaIndex
+    imports google.generativeai which can set global state routing embed_content
+    to v1beta where the model returns 404.  This client was initialised with
+    ``http_options={'api_version': 'v1'}`` to bypass that problem.
+
+    Returns
+    -------
+    genai.Client
+        v1-pinned client (falls back to default client if v1 init failed).
+    """
+    if _embed_client is None:
+        raise RuntimeError(
+            "[llm_client] Embed client not initialised. "
+            "Call llm_client.init(api_key) in main.py first."
+        )
+    return _embed_client
 
 
 def get_api_key() -> str:
