@@ -155,16 +155,15 @@ def build_docx() -> None:
     # ====================================================================
     _add_heading(doc, "Abstract", level=1)
     _add_body(doc,
-        "This project implements an automated CV (resume) ranking system that "
-        "leverages two Large Language Models (LLMs) to match candidate profiles "
-        "against a given job description. The system uses Google Gemini "
-        "gemini-2.5-flash to perform deep semantic extraction of hiring criteria "
-        "from the job description, and gemini-2.5-flash (in a separate "
-        "scoring role) to score each candidate across four dimensions: must-have skills, nice-to-have "
-        "qualifications, experience relevance, and keyword presence. Candidates are ranked by a "
-        "weighted composite score and the results are exported as both a "
-        "human-readable text report and a machine-readable CSV file. The pipeline "
-        "is fully terminal-driven, modular, and extensible."
+        "This project implements an automated CV (resume) ranking pipeline that "
+        "uses two Google Gemini LLMs orchestrated by LangChain, with LlamaIndex "
+        "for semantic similarity scoring and pyresparser for structured resume "
+        "extraction. LLM #1 (gemini-2.5-flash) analyses the job description "
+        "once to extract structured hiring criteria; LLM #2 (gemini-2.5-pro) "
+        "scores each candidate CV against those criteria across five dimensions. "
+        "Candidates are ranked by a weighted composite score and results are "
+        "exported as a human-readable TXT report and a machine-readable CSV. "
+        "The pipeline is fully terminal-driven, modular, and extensible."
     )
 
     # ====================================================================
@@ -221,55 +220,67 @@ def build_docx() -> None:
     # 4.1 Tools
     _add_heading(doc, "4.1  Tools and Technologies", level=2)
     _add_kv_table(doc, [
-        ("Python 3.11+",       "Core programming language"),
-        ("Google Gemini API",  "Free hosted LLM inference via Google AI Studio"),
-        ("gemini-2.5-flash",          "LLM #1 -- Job description analysis (runs once)"),
-        ("gemini-2.5-flash",          "LLM #2 -- Per-CV scoring (runs once per candidate)"),
-        ("pypdf",              "PDF resume text extraction"),
-        ("python-docx",        "Word (.docx) resume and report handling"),
-        ("fpdf2",              "PDF report generation"),
+        ("Python 3.11+",              "Core programming language"),
+        ("Google Gemini API",         "LLM inference via Google AI Studio"),
+        ("gemini-2.5-flash",          "LLM #1 -- JD extraction (runs once)"),
+        ("gemini-2.5-pro",            "LLM #2 -- Per-CV scoring (runs per candidate)"),
+        ("LangChain",               "Orchestration + structured output parsing"),
+        ("LlamaIndex",                "Semantic matching via Gemini text-embedding-004"),
+        ("pyresparser",               "Structured resume field extraction"),
+        ("pypdf / python-docx",       "Raw text extraction from PDF and DOCX files"),
+        ("fpdf2",                     "PDF project report generation"),
     ])
 
     # 4.2 Architecture
     _add_heading(doc, "4.2  System Architecture", level=2)
     _add_kv_table(doc, [
-        ("main.py",              "CLI entry point; orchestrates the full pipeline"),
-        ("resume_parser.py",     "Extracts raw text from PDF / DOCX / TXT files"),
-        ("jd_analyzer.py",       "LLM #1 -- extracts structured requirements from JD"),
-        ("cv_scorer.py",         "LLM #2 -- scores each CV on 4 dimensions"),
-        ("ranker.py",            "Weighted composite score computation and sorting"),
+        ("main.py",              "CLI entry point + --interactive query refinement mode"),
+        ("llm_client.py",        "Shared client: google-genai, LangChain, LlamaIndex"),
+        ("resume_parser.py",     "Text extraction (pypdf/docx) + pyresparser profiles"),
+        ("jd_analyzer.py",       "LangChain chain: LLM #1 structured JD extraction"),
+        ("cv_scorer.py",         "LangChain chain: LLM #2 multi-dimension CV scoring"),
+        ("ranker.py",            "LlamaIndex semantic score + weighted composite rank"),
         ("report_generator.py",  "Writes TXT and CSV reports to disk"),
-        ("generate_pdf_report.py", "Generates this PDF project report"),
-        ("generate_docx_report.py", "Generates this editable DOCX project report"),
     ])
 
     # 4.3 Pipeline
-    _add_heading(doc, "4.3  Two-LLM Pipeline", level=2)
+    _add_heading(doc, "4.3  Two-LLM Pipeline with LangChain and LlamaIndex", level=2)
     _add_body(doc,
-        "Step 1 -- LLM #1 (gemini-2.5-flash) reads the full job description "
-        "and returns a structured JSON object containing mandatory "
-        "skills, preferred qualifications, minimum experience, domain keywords, "
-        "and a role summary. This step runs once per job opening."
+        "Step 1 -- Resume Parsing: pypdf / python-docx extract raw text from "
+        "each CV. pyresparser uses spaCy NLP to extract structured fields "
+        "(name, skills, education, experience) for richer LLM context."
     )
     _add_body(doc,
-        "Step 2 -- LLM #2 (gemini-2.5-flash) is invoked once per candidate. "
-        "It receives the structured requirements and the candidate's CV text, "
-        "and returns numeric scores across four dimensions along with strengths, "
-        "gaps, and a recruiter recommendation."
-        "intentionally to keep latency and cost low in the per-CV scoring loop."
+        "Step 2 -- JD Analysis (LangChain + LLM #1, gemini-2.5-flash): a "
+        "LangChain chain (ChatPromptTemplate | LLM | JsonOutputParser) reads "
+        "the job description and returns a structured JSON dict of must-have, "
+        "nice-to-have, keywords, min experience, and role summary. Runs once."
+    )
+    _add_body(doc,
+        "Step 3 -- CV Scoring (LangChain + LLM #2, gemini-2.5-pro): a second "
+        "LangChain chain evaluates each CV using structured JD requirements + "
+        "pyresparser profile + raw CV text. Returns scores on four dimensions "
+        "plus strengths, gaps, and a recruiter recommendation per candidate."
+    )
+    _add_body(doc,
+        "Step 4 -- Semantic Matching (LlamaIndex): GeminiEmbedding "
+        "(text-embedding-004) embeds both the JD and each CV. Cosine similarity "
+        "produces a semantic_score (0-100) capturing holistic alignment beyond "
+        "keyword presence."
     )
 
     # 4.4 Scoring
-    _add_heading(doc, "4.4  Composite Scoring Formula", level=2)
+    _add_heading(doc, "4.4  Composite Scoring Formula (5 Dimensions)", level=2)
     _add_body(doc,
-        "Composite = 0.40 x MustHave + 0.25 x Experience "
-        "+ 0.20 x NiceToHave + 0.15 x Keywords"
+        "Composite = 0.35 x MustHave + 0.20 x SemanticSimilarity "
+        "+ 0.20 x Experience + 0.15 x NiceToHave + 0.10 x Keywords"
     )
     _add_body(doc,
-        "Must-Have skills carry the highest weight (40%) because failing to meet "
-        "mandatory requirements is typically a hard disqualifier. Experience (25%) "
-        "and Nice-to-Have (20%) follow, with Keyword presence (15%) acting as a "
-        "signal of domain fluency."
+        "Must-Have skills carry the highest weight (35%) as the primary hard "
+        "filter. Semantic similarity (20%, LlamaIndex) captures meaning-level "
+        "alignment beyond keyword presence. Experience (20%) reflects depth "
+        "of relevant background. Nice-to-Have (15%) adds value without being a "
+        "blocker. Keyword score (10%) signals domain fluency."
     )
 
     # ====================================================================

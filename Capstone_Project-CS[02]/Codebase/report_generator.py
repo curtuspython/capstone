@@ -29,7 +29,7 @@ def generate_report(
     output_dir: str = ".",
     base_name: str = "cv_ranking_report",
     llm1: str = "gemini-2.5-flash",
-    llm2: str = "gemini-2.5-flash",
+    llm2: str = "gemini-2.5-pro",
 ) -> dict[str, str]:
     """
     Write the ranking report to disk in TXT and CSV formats.
@@ -80,7 +80,7 @@ def _write_txt_report(
     ranked_candidates: list[dict],
     requirements: dict,
     llm1: str = "gemini-2.5-flash",
-    llm2: str = "gemini-2.5-flash",
+    llm2: str = "gemini-2.5-pro",
 ) -> None:
     """Write the full narrative text report."""
     lines: list[str] = []
