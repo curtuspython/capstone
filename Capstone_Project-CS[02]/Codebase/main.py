@@ -12,32 +12,35 @@ Required Arguments
     --cvs  PATH   Path to the directory containing candidate CV files
 
 Optional Arguments
-    --api-key  KEY  Groq API key (can also be set via GROQ_API_KEY env var)
+    --api-key  KEY  Google Gemini API key
+                    (can also be set via GEMINI_API_KEY env var
+                     or stored in a .env file in the same directory)
     --output   DIR  Directory to write reports (default: current directory)
     --min-score N   Minimum composite score threshold, 0-100 (default: none)
     --help          Show this help message and exit
 
 Examples
     # Using an environment variable for the API key:
-    export GROQ_API_KEY=gsk_...
+    export GEMINI_API_KEY=AIza...
     python main.py --jd job_description.txt --cvs ./resumes/
 
     # Passing the API key as a CLI argument:
-    python main.py --jd job_desc.pdf --cvs ./resumes/ --api-key gsk_... --output ./reports/
+    python main.py --jd jd.pdf --cvs ./resumes/ --api-key AIza... --output ./reports/
 
 Two LLMs are used:
-    LLM #1  llama-3.3-70b-versatile  — deep job-description analysis
-    LLM #2  gemma2-9b-it             — per-CV scoring against requirements
+    LLM #1  gemini-2.0-flash  - deep job-description analysis
+    LLM #2  gemini-1.5-flash  - per-CV scoring against requirements
 
-All LLM calls are routed through the Groq API.
-Get a free API key at https://console.groq.com/
+All LLM calls go through the Google Gemini API (free tier).
+Get a free API key at https://aistudio.google.com/
 """
 
 import argparse
 import os
 import sys
+from pathlib import Path
 
-from groq import Groq
+import google.generativeai as genai
 
 from resume_parser import parse_resumes_from_directory, extract_text_from_file
 from jd_analyzer import analyze_job_description
@@ -54,12 +57,12 @@ def _build_parser() -> argparse.ArgumentParser:
     """Construct and return the argument parser."""
     parser = argparse.ArgumentParser(
         prog="main.py",
-        description="CV Sorting using LLMs — AI-powered candidate ranking",
+        description="CV Sorting using LLMs - AI-powered candidate ranking (Google Gemini)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Examples:\n"
             "  python main.py --jd job_description.txt --cvs ./resumes/\n"
-            "  python main.py --jd jd.pdf --cvs ./cvs/ --api-key gsk_... --output ./out/\n"
+            "  python main.py --jd jd.pdf --cvs ./cvs/ --api-key AIza... --output ./out/\n"
         ),
     )
     parser.add_argument(
@@ -72,7 +75,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--api-key", default=None, metavar="KEY",
-        help="Groq API key (falls back to GROQ_API_KEY environment variable)",
+        help="Google Gemini API key (falls back to GEMINI_API_KEY env var or .env file)",
     )
     parser.add_argument(
         "--output", default=".", metavar="DIR",
@@ -80,7 +83,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--min-score", type=float, default=None, metavar="N",
-        help="Minimum composite score threshold 0–100 (flags candidates below threshold)",
+        help="Minimum composite score threshold 0-100 (flags candidates below threshold)",
     )
     return parser
 
@@ -91,26 +94,46 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def _resolve_api_key(cli_key: str | None) -> str:
     """
-    Resolve the Groq API key from CLI argument or environment variable.
-
-    Precedence:
+    Resolve the Gemini API key with the following precedence:
       1. --api-key CLI argument
-      2. GROQ_API_KEY environment variable
+      2. GEMINI_API_KEY environment variable
+      3. GEMINI_API_KEY entry inside a .env file in the Codebase directory
 
     Raises SystemExit if no key is found.
     """
-    key = cli_key or os.environ.get("GROQ_API_KEY", "")
-    if not key:
-        print(
-            "[main] ERROR: Groq API key not found.\n"
-            "  Set the GROQ_API_KEY environment variable:\n"
-            "      export GROQ_API_KEY=gsk_...\n"
-            "  Or pass it directly:\n"
-            "      python main.py --jd ... --cvs ... --api-key gsk_...",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-    return key
+    # 1. CLI argument
+    if cli_key:
+        return cli_key
+
+    # 2. Environment variable
+    key = os.environ.get("GEMINI_API_KEY", "")
+    if key:
+        return key
+
+    # 3. .env file sitting next to main.py
+    env_file = Path(__file__).parent / ".env"
+    if env_file.exists():
+        for line in env_file.read_text().splitlines():
+            line = line.strip()
+            if line.startswith("GEMINI_API_KEY") and "=" in line:
+                key = line.split("=", 1)[1].strip()
+                if key:
+                    print("[main] API key loaded from .env file.")
+                    return key
+
+    print(
+        "[main] ERROR: Gemini API key not found.\n"
+        "  Option 1 - Set environment variable:\n"
+        "      export GEMINI_API_KEY=AIza...\n"
+        "  Option 2 - Pass via CLI:\n"
+        "      python main.py --jd ... --cvs ... --api-key AIza...\n"
+        "  Option 3 - Add to .env file in the Codebase directory:\n"
+        "      GEMINI_API_KEY=AIza...\n"
+        "\n"
+        "  Get a FREE key at: https://aistudio.google.com/",
+        file=sys.stderr,
+    )
+    sys.exit(1)
 
 
 def _load_jd_text(jd_path: str) -> str:
@@ -142,12 +165,13 @@ def _load_jd_text(jd_path: str) -> str:
 def _print_banner() -> None:
     """Print a welcome banner to stdout."""
     banner = """
-┌──────────────────────────────────────────────────┐
-│  CV Sorting using LLMs — Capstone Project CS[02]  │
-│                                                    │
-│  LLM #1 : llama-3.3-70b-versatile (JD analysis)   │
-│  LLM #2 : gemma2-9b-it             (CV scoring)    │
-└──────────────────────────────────────────────────┘
++--------------------------------------------------+
+|  CV Sorting using LLMs -- Capstone Project CS[02] |
+|                                                    |
+|  LLM #1 : gemini-2.0-flash  (JD analysis)         |
+|  LLM #2 : gemini-1.5-flash  (CV scoring)          |
+|  Provider: Google Gemini API (free tier)           |
++--------------------------------------------------+
     """
     print(banner)
 
@@ -160,10 +184,10 @@ def main() -> None:
     """
     Orchestrate the full CV sorting pipeline:
       1. Parse CLI arguments.
-      2. Authenticate with Groq.
-      3. Load and analyse the job description (LLM #1).
+      2. Resolve and configure Gemini API key.
+      3. Load and analyse the job description (LLM #1 - gemini-2.0-flash).
       4. Parse all candidate CVs from the given directory.
-      5. Score each CV against the job requirements (LLM #2).
+      5. Score each CV against the job requirements (LLM #2 - gemini-1.5-flash).
       6. Rank candidates by composite score.
       7. Print results to terminal and write reports to disk.
     """
@@ -172,43 +196,44 @@ def main() -> None:
     parser = _build_parser()
     args = parser.parse_args()
 
-    # Step 1: Resolve API key and authenticate
+    # Step 1: Resolve API key and configure Gemini globally
     api_key = _resolve_api_key(args.api_key)
-    client = Groq(api_key=api_key)
-    print("[main] Groq client initialised.")
+    genai.configure(api_key=api_key)
+    print("[main] Google Gemini API configured.")
 
     # Step 2: Load job description
     print(f"\n[main] Loading job description from: {args.jd}")
     jd_text = _load_jd_text(args.jd)
     print(f"[main] Job description loaded ({len(jd_text)} characters).")
 
-    # Step 3: Analyse JD with LLM #1 (llama-3.3-70b-versatile)
-    print("\n[main] Step 1/4 — Analysing job description with LLM #1 …")
-    requirements = analyze_job_description(jd_text, client)
-    print(f"[main] Job title detected: {requirements.get('title', 'N/A')}")
-    print(f"[main] Must-have skills : {len(requirements.get('must_have', []))} extracted")
+    # Step 3: Analyse JD with LLM #1 (gemini-2.0-flash)
+    print("\n[main] Step 1/4 -- Analysing job description with LLM #1 (gemini-2.0-flash) ...")
+    requirements = analyze_job_description(jd_text)
+    print(f"[main] Job title detected : {requirements.get('title', 'N/A')}")
+    print(f"[main] Must-have skills   : {len(requirements.get('must_have', []))} extracted")
+    print(f"[main] Keywords           : {len(requirements.get('keywords', []))} extracted")
 
     # Step 4: Parse candidate CVs
-    print(f"\n[main] Step 2/4 — Parsing candidate CVs from: {args.cvs}")
+    print(f"\n[main] Step 2/4 -- Parsing candidate CVs from: {args.cvs}")
     candidates = parse_resumes_from_directory(args.cvs)
     if not candidates:
         print("[main] No candidates found. Exiting.", file=sys.stderr)
         sys.exit(1)
     print(f"[main] {len(candidates)} candidate(s) loaded.")
 
-    # Step 5: Score each CV with LLM #2 (gemma2-9b-it)
-    print(f"\n[main] Step 3/4 — Scoring {len(candidates)} CV(s) with LLM #2 …")
-    scored_candidates = score_all_cvs(candidates, requirements, client)
+    # Step 5: Score each CV with LLM #2 (gemini-1.5-flash)
+    print(f"\n[main] Step 3/4 -- Scoring {len(candidates)} CV(s) with LLM #2 (gemini-1.5-flash) ...")
+    scored_candidates = score_all_cvs(candidates, requirements)
 
     # Step 6: Rank candidates
-    print("\n[main] Step 4/4 — Ranking candidates …")
+    print("\n[main] Step 4/4 -- Ranking candidates ...")
     ranked_candidates = rank_candidates(scored_candidates, min_score=args.min_score)
 
     # Step 7: Print summary to terminal
     print(get_ranking_summary(ranked_candidates))
 
     # Step 8: Write reports to disk
-    print("\n[main] Writing reports …")
+    print("\n[main] Writing reports ...")
     written_files = generate_report(
         ranked_candidates=ranked_candidates,
         requirements=requirements,
@@ -219,7 +244,7 @@ def main() -> None:
     for fmt, path in written_files.items():
         print(f"  [{fmt.upper()}] {path}")
 
-    print("\n[main] ✔ CV Sorting complete.")
+    print("\n[main] CV Sorting complete.")
 
 
 if __name__ == "__main__":

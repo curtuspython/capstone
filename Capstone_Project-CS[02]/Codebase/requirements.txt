@@ -1,9 +1,9 @@
-# CV Sorting using LLMs (CS[02]) — Python Dependencies
+# CV Sorting using LLMs (CS[02]) - Python Dependencies
 # Install with:
 #   pip install -r requirements.txt
 
-# LLM API client (Groq)
-groq
+# Google Gemini LLM API
+google-generativeai
 
 # Resume parsing
 pypdf          # PDF parsing

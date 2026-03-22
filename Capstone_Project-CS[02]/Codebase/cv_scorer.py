@@ -1,8 +1,8 @@
 """
 cv_scorer.py
 ------------
-Uses LLM #2 (Groq: gemma2-9b-it) to score a single candidate CV against
-the structured job requirements extracted by jd_analyzer.py.
+Uses LLM #2 (Google Gemini: gemini-1.5-flash) to score a single candidate
+CV against the structured job requirements extracted by jd_analyzer.py.
 
 For each CV the LLM returns:
   - overall_score      : int  0-100
@@ -14,25 +14,25 @@ For each CV the LLM returns:
   - gaps               : list[str] (top 3 missing areas)
   - recommendation     : str  (1-2 sentence recruiter note)
 
-Using a lighter/faster model (gemma2-9b-it) here keeps costs down while
-still providing meaningful per-candidate scoring. The separation from
+Using gemini-1.5-flash (lighter/faster) here keeps costs low while still
+providing meaningful per-candidate scoring. The separation from
 jd_analyzer lets us run scoring in a loop without re-running the heavier
-Llama model for every single CV.
+gemini-2.0-flash model for every single CV.
 """
 
 import json
 import re
 
-from groq import Groq
+import google.generativeai as genai
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
-# LLM #2 – lighter, faster model used for per-CV scoring loop
-SCORER_MODEL = "gemma2-9b-it"
+# LLM #2 - lighter, faster model used for per-CV scoring loop
+SCORER_MODEL = "gemini-1.5-flash"
 
-_SYSTEM_PROMPT = (
+_SYSTEM_INSTRUCTION = (
     "You are a senior technical recruiter. "
     "Evaluate candidate resumes against structured job requirements and "
     "provide objective, numeric scores with brief justifications."
@@ -74,9 +74,12 @@ Output ONLY valid JSON. No markdown, no extra text.
 # Public API
 # ---------------------------------------------------------------------------
 
-def score_cv(candidate: dict, requirements: dict, client: Groq) -> dict:
+def score_cv(candidate: dict, requirements: dict) -> dict:
     """
     Score a single candidate CV against the extracted job requirements.
+
+    Requires google.generativeai to be configured with an API key
+    before calling (via genai.configure in main.py).
 
     Parameters
     ----------
@@ -84,8 +87,6 @@ def score_cv(candidate: dict, requirements: dict, client: Groq) -> dict:
         Must contain keys 'name', 'file', and 'text' (raw CV text).
     requirements : dict
         Structured JD requirements from jd_analyzer.analyze_job_description().
-    client : Groq
-        Authenticated Groq API client.
 
     Returns
     -------
@@ -96,6 +97,11 @@ def score_cv(candidate: dict, requirements: dict, client: Groq) -> dict:
     candidate_name = candidate.get("name", "Unknown")
     print(f"[cv_scorer] Scoring: {candidate_name} (model: {SCORER_MODEL})")
 
+    model = genai.GenerativeModel(
+        model_name=SCORER_MODEL,
+        system_instruction=_SYSTEM_INSTRUCTION,
+    )
+
     # Truncate CV text to avoid exceeding context length
     cv_text_trunc = candidate["text"][:6000]
     requirements_json = json.dumps(requirements, indent=2)
@@ -105,24 +111,22 @@ def score_cv(candidate: dict, requirements: dict, client: Groq) -> dict:
         cv_text=cv_text_trunc,
     )
 
-    response = client.chat.completions.create(
-        model=SCORER_MODEL,
-        messages=[
-            {"role": "system", "content": _SYSTEM_PROMPT},
-            {"role": "user",   "content": prompt},
-        ],
-        temperature=0.15,
-        max_tokens=768,
+    response = model.generate_content(
+        prompt,
+        generation_config=genai.GenerationConfig(
+            temperature=0.15,
+            max_output_tokens=768,
+        ),
     )
 
-    raw_output = response.choices[0].message.content.strip()
+    raw_output = response.text.strip()
     scores = _parse_json_response(raw_output, label=f"scores for {candidate_name}")
 
     # Return a new dict so original candidate is not mutated
     return {**candidate, "scores": scores}
 
 
-def score_all_cvs(candidates: list[dict], requirements: dict, client: Groq) -> list[dict]:
+def score_all_cvs(candidates: list[dict], requirements: dict) -> list[dict]:
     """
     Score every candidate in the list and return the enriched list.
 
@@ -132,8 +136,6 @@ def score_all_cvs(candidates: list[dict], requirements: dict, client: Groq) -> l
         List of candidate dicts from resume_parser.parse_resumes_from_directory().
     requirements : dict
         Structured JD requirements from jd_analyzer.analyze_job_description().
-    client : Groq
-        Authenticated Groq API client.
 
     Returns
     -------
@@ -143,10 +145,9 @@ def score_all_cvs(candidates: list[dict], requirements: dict, client: Groq) -> l
     scored: list[dict] = []
     for candidate in candidates:
         try:
-            scored.append(score_cv(candidate, requirements, client))
+            scored.append(score_cv(candidate, requirements))
         except Exception as exc:
             print(f"[cv_scorer] Error scoring {candidate.get('name', '?')}: {exc}")
-            # Keep the candidate in the list with a zero-score placeholder
             scored.append({
                 **candidate,
                 "scores": _zero_scores(error=str(exc)),

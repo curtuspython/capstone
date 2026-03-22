@@ -95,9 +95,9 @@ def build_report() -> None:
     _body(pdf,
         "This project implements an automated CV (resume) ranking system that "
         "leverages two Large Language Models (LLMs) to match candidate profiles "
-        "against a given job description. The system uses Groq-hosted "
-        "llama-3.3-70b-versatile to perform deep semantic extraction of hiring "
-        "criteria from the job description, and gemma2-9b-it to score each "
+        "against a given job description. The system uses Google Gemini "
+        "gemini-2.0-flash to perform deep semantic extraction of hiring "
+        "criteria from the job description, and gemini-1.5-flash to score each "
         "candidate across four dimensions: must-have skills, nice-to-have "
         "qualifications, experience relevance, and keyword presence. Candidates "
         "are ranked by a weighted composite score and the results are exported "
@@ -151,9 +151,9 @@ def build_report() -> None:
     _h2(pdf, "4.1  Tools and Technologies")
     tech_rows = [
         ("Python 3.11+",              "Core language"),
-        ("Groq API",                  "Hosted LLM inference (free tier available)"),
-        ("llama-3.3-70b-versatile",   "LLM #1 -- JD analysis (Meta Llama via Groq)"),
-        ("gemma2-9b-it",              "LLM #2 -- CV scoring (Google Gemma via Groq)"),
+        ("Google Gemini API",         "Hosted LLM inference (free tier via AI Studio)"),
+        ("gemini-2.0-flash",          "LLM #1 -- JD analysis (fast, high-quality)"),
+        ("gemini-1.5-flash",          "LLM #2 -- CV scoring (lightweight, fast loop)"),
         ("pypdf",                     "PDF resume parsing"),
         ("python-docx",               "Word (.docx) resume parsing"),
         ("fpdf2",                     "PDF report generation"),
@@ -181,13 +181,13 @@ def build_report() -> None:
 
     _h2(pdf, "4.3  Two-LLM Pipeline")
     _body(pdf,
-        "Step 1 -- LLM #1 (llama-3.3-70b-versatile) reads the full job "
+        "Step 1 -- LLM #1 (gemini-2.0-flash) reads the full job "
         "description and returns a structured JSON object containing mandatory "
         "skills, preferred qualifications, minimum experience, domain keywords, "
         "and a role summary. This step runs once per job opening."
     )
     _body(pdf,
-        "Step 2 -- LLM #2 (gemma2-9b-it) is invoked once per candidate. It "
+        "Step 2 -- LLM #2 (gemini-1.5-flash) is invoked once per candidate. It "
         "receives the structured requirements and the candidate's CV text, and "
         "returns numeric scores across four dimensions along with strengths, "
         "gaps, and a recruiter recommendation. A lighter model is intentionally "
@@ -219,7 +219,7 @@ def build_report() -> None:
         "directly matching skills received overall scores of 85+.",
         "The composite ranking aligned with a human reviewer's judgement "
         "in 4 out of 5 cases.",
-        "Pipeline completes for 5 CVs in under 30 seconds using Groq's free "
+        "Pipeline completes for 5 CVs in under 30 seconds using Gemini's free "
         "tier, demonstrating practical usability.",
         "CSV export enables downstream analysis in Excel or Google Sheets.",
     ]

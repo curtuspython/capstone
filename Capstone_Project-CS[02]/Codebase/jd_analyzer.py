@@ -1,7 +1,7 @@
 """
 jd_analyzer.py
 --------------
-Uses LLM #1 (Groq: llama-3.3-70b-versatile) to extract structured
+Uses LLM #1 (Google Gemini: gemini-2.0-flash) to extract structured
 requirements from a raw job description text.
 
 The LLM parses the job description and returns a JSON object with:
@@ -19,16 +19,16 @@ LLM step is easy to swap, test, or extend without touching the other.
 import json
 import re
 
-from groq import Groq
+import google.generativeai as genai
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
-# LLM #1 – used for deep understanding of the job description
-JD_MODEL = "llama-3.3-70b-versatile"
+# LLM #1 - used for deep understanding of the job description
+JD_MODEL = "gemini-2.0-flash"
 
-_SYSTEM_PROMPT = (
+_SYSTEM_INSTRUCTION = (
     "You are an expert HR consultant and technical recruiter. "
     "Your task is to analyse a job description and extract the key hiring "
     "criteria in structured JSON format. Be precise, concise, and realistic."
@@ -38,12 +38,12 @@ _USER_PROMPT_TEMPLATE = """
 Analyse the following job description and extract the hiring criteria.
 
 Return a JSON object with EXACTLY these keys:
-  "title"          : string  — exact job title
-  "must_have"      : list of strings — mandatory technical/non-technical requirements
-  "nice_to_have"   : list of strings — preferred but not mandatory qualifications
-  "experience_min" : integer — minimum years of relevant experience (0 if unspecified)
-  "keywords"       : list of strings — important domain/tool/language keywords
-  "summary"        : string — 2-3 sentence role summary
+  "title"          : string  - exact job title
+  "must_have"      : list of strings - mandatory technical/non-technical requirements
+  "nice_to_have"   : list of strings - preferred but not mandatory qualifications
+  "experience_min" : integer - minimum years of relevant experience (0 if unspecified)
+  "keywords"       : list of strings - important domain/tool/language keywords
+  "summary"        : string - 2-3 sentence role summary
 
 Output ONLY valid JSON. No markdown, no extra text.
 
@@ -58,16 +58,17 @@ Job Description:
 # Public API
 # ---------------------------------------------------------------------------
 
-def analyze_job_description(jd_text: str, client: Groq) -> dict:
+def analyze_job_description(jd_text: str) -> dict:
     """
     Extract structured hiring criteria from a job description.
+
+    Requires google.generativeai to be configured with an API key
+    before calling (via genai.configure in main.py).
 
     Parameters
     ----------
     jd_text : str
         Raw text of the job description.
-    client : Groq
-        Authenticated Groq API client.
 
     Returns
     -------
@@ -82,19 +83,22 @@ def analyze_job_description(jd_text: str, client: Groq) -> dict:
     """
     print(f"[jd_analyzer] Analysing JD with model: {JD_MODEL}")
 
-    prompt = _USER_PROMPT_TEMPLATE.format(jd_text=jd_text[:8000])  # guard token limit
-
-    response = client.chat.completions.create(
-        model=JD_MODEL,
-        messages=[
-            {"role": "system", "content": _SYSTEM_PROMPT},
-            {"role": "user",   "content": prompt},
-        ],
-        temperature=0.1,   # low temperature → consistent, deterministic output
-        max_tokens=1024,
+    model = genai.GenerativeModel(
+        model_name=JD_MODEL,
+        system_instruction=_SYSTEM_INSTRUCTION,
     )
 
-    raw_output = response.choices[0].message.content.strip()
+    prompt = _USER_PROMPT_TEMPLATE.format(jd_text=jd_text[:8000])  # guard token limit
+
+    response = model.generate_content(
+        prompt,
+        generation_config=genai.GenerationConfig(
+            temperature=0.1,    # low temp -> consistent, deterministic output
+            max_output_tokens=1024,
+        ),
+    )
+
+    raw_output = response.text.strip()
     return _parse_json_response(raw_output, label="JD analysis")
 
 

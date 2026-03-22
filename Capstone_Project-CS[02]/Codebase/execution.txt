@@ -1,10 +1,21 @@
 # CV Sorting using LLMs - CS[02] - Execution Instructions
 # --------------------------------------------------------
 # Prerequisites:
-#   pip install groq pypdf python-docx fpdf2
+#   pip install -r requirements.txt
 #
-# Set your Groq API key (free at https://console.groq.com/):
-#   export GROQ_API_KEY=gsk_your_key_here
+# Get a FREE Google Gemini API key (no credit card needed):
+#   https://aistudio.google.com/ -> Get API Key -> Create API key
+#
+# Set your API key (choose ONE method):
+#
+#   Method 1 - Environment variable:
+#     export GEMINI_API_KEY=AIza...
+#
+#   Method 2 - .env file (create a file named .env in this directory):
+#     GEMINI_API_KEY=AIza...
+#
+#   Method 3 - Pass directly as CLI argument:
+#     python main.py --jd ... --cvs ... --api-key AIza...
 #
 # Basic execution:
 #   python main.py --jd <path_to_job_description> --cvs <path_to_cv_directory>
@@ -12,8 +23,5 @@
 # Full example with all options:
 #   python main.py --jd job_description.txt --cvs ./resumes/ --output ./reports/ --min-score 50
 #
-# Passing API key as argument (instead of env var):
-#   python main.py --jd job_description.txt --cvs ./resumes/ --api-key gsk_your_key_here
-#
-# Minimal one-liner:
-python main.py --jd job_description.txt --cvs ./resumes/
+# Quick test with bundled sample data:
+python main.py --jd test_data/job_description.txt --cvs test_data/cvs/
