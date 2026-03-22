@@ -11,8 +11,15 @@ __pycache__/
 cv_ranking_report_*.txt
 cv_ranking_report_*.csv
 
+# Environment / secrets - NEVER commit API keys!
+.env
+*.env
+
 # macOS junk
 .DS_Store
 
 # Submission zip
 *.zip
+
+# Local test data - input/output data not shared per submission instructions
+test_data/

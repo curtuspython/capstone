@@ -62,7 +62,7 @@ def _add_body(doc: Document, text: str) -> None:
     para = doc.add_paragraph(text)
     para.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
     for run in para.runs:
-        run.font.size     = Pt(11)
+        run.font.size     = Pt(12)  # minimum 12pt per submission instructions
         run.font.color.rgb = DARK_GREY
     para.paragraph_format.space_after = Pt(6)
 
@@ -71,7 +71,7 @@ def _add_bullet(doc: Document, text: str) -> None:
     """Add a bullet-point paragraph."""
     para = doc.add_paragraph(style="List Bullet")
     run  = para.add_run(text)
-    run.font.size      = Pt(11)
+    run.font.size      = Pt(12)  # minimum 12pt per submission instructions
     run.font.color.rgb = DARK_GREY
     para.paragraph_format.space_after = Pt(3)
 
@@ -97,7 +97,7 @@ def _add_kv_table(doc: Document, rows: list[tuple[str, str]]) -> None:
             for run in para.runs:
                 run.font.bold       = True
                 run.font.color.rgb  = WHITE
-                run.font.size       = Pt(11)
+                run.font.size       = Pt(12)  # minimum 12pt per submission instructions
 
     # Data rows
     for key, val in rows:
@@ -107,10 +107,10 @@ def _add_kv_table(doc: Document, rows: list[tuple[str, str]]) -> None:
         for para in row_cells[0].paragraphs:
             for run in para.runs:
                 run.font.bold  = True
-                run.font.size  = Pt(10)
+                run.font.size  = Pt(12)  # minimum 12pt per submission instructions
         for para in row_cells[1].paragraphs:
             for run in para.runs:
-                run.font.size  = Pt(10)
+                run.font.size  = Pt(12)  # minimum 12pt per submission instructions
 
     doc.add_paragraph("")   # spacing after table
 

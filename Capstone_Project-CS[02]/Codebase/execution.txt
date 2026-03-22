@@ -1,27 +1,139 @@
-# CV Sorting using LLMs - CS[02] - Execution Instructions
-# --------------------------------------------------------
-# Prerequisites:
+# ==============================================================================
+# CV Sorting using LLMs  -  CS[02]  -  Execution Instructions
+# ==============================================================================
+#
+# WHAT THIS PROJECT DOES:
+#   Reads a job description + a folder of candidate CVs, scores every CV
+#   using two Google Gemini LLMs, ranks candidates by a weighted composite
+#   score, and writes a detailed TXT + CSV report to disk.
+#
+# TWO LLMs USED:
+#   LLM #1 : gemini-2.0-flash  ->  Analyses the job description once
+#   LLM #2 : gemini-1.5-flash  ->  Scores each candidate CV in a loop
+#
+# SUPPORTED FILE FORMATS:
+#   Job description : .txt  |  .pdf  |  .docx
+#   Candidate CVs  : .txt  |  .pdf  |  .docx  |  .md
+#
+# ==============================================================================
+# STEP 1 - INSTALL DEPENDENCIES
+# ==============================================================================
+#
 #   pip install -r requirements.txt
 #
-# Get a FREE Google Gemini API key (no credit card needed):
-#   https://aistudio.google.com/ -> Get API Key -> Create API key
+#   Packages installed:
+#     google-generativeai  ->  Gemini API client
+#     pypdf                ->  PDF resume parsing
+#     python-docx          ->  Word (.docx) resume parsing
+#     fpdf2                ->  PDF report generation
 #
-# Set your API key (choose ONE method):
+# ==============================================================================
+# STEP 2 - GET A FREE GEMINI API KEY
+# ==============================================================================
 #
-#   Method 1 - Environment variable:
-#     export GEMINI_API_KEY=AIza...
+#   1. Visit  https://aistudio.google.com/
+#   2. Click  "Get API Key"  ->  "Create API key"
+#   3. Copy the key (starts with "AIza...")
 #
-#   Method 2 - .env file (create a file named .env in this directory):
-#     GEMINI_API_KEY=AIza...
+# ==============================================================================
+# STEP 3 - SET YOUR API KEY  (choose ONE of the 3 methods below)
+# ==============================================================================
 #
-#   Method 3 - Pass directly as CLI argument:
-#     python main.py --jd ... --cvs ... --api-key AIza...
+#   METHOD 1 - Environment variable  [RECOMMENDED]
+#   ------------------------------------------------
+#   On Mac / Linux:
+#     export GEMINI_API_KEY=AIzaSy...
 #
-# Basic execution:
-#   python main.py --jd <path_to_job_description> --cvs <path_to_cv_directory>
+#   On Windows CMD:
+#     set GEMINI_API_KEY=AIzaSy...
 #
-# Full example with all options:
-#   python main.py --jd job_description.txt --cvs ./resumes/ --output ./reports/ --min-score 50
+#   On Windows PowerShell:
+#     $env:GEMINI_API_KEY="AIzaSy..."
 #
-# Quick test with bundled sample data:
-python main.py --jd test_data/job_description.txt --cvs test_data/cvs/
+#   Verify it is set:
+#     echo $GEMINI_API_KEY          (Mac/Linux)
+#     echo %GEMINI_API_KEY%         (Windows CMD)
+#
+#   METHOD 2 - .env file
+#   ------------------------------------------------
+#   Create a file named exactly ".env" inside the Codebase/ directory
+#   and add this single line (no quotes):
+#
+#     GEMINI_API_KEY=AIzaSy...
+#
+#   The code reads this file automatically on startup.
+#
+#   METHOD 3 - CLI argument
+#   ------------------------------------------------
+#   Pass the key directly when running the script:
+#
+#     python main.py --jd <jd_file> --cvs <cv_dir> --api-key AIzaSy...
+#
+# ==============================================================================
+# STEP 4 - RUN THE PROJECT
+# ==============================================================================
+#
+#   BASIC USAGE:
+#     python main.py --jd <path_to_job_description> --cvs <path_to_cv_directory>
+#
+#   FULL USAGE (all options):
+#     python main.py \
+#       --jd    <path_to_job_description_file>  \
+#       --cvs   <path_to_cv_directory>          \
+#       --output  <output_directory>            \
+#       --min-score <0-100>                     \
+#       --api-key   <GEMINI_API_KEY>
+#
+#   ARGUMENTS:
+#     --jd          PATH   Job description file (.txt / .pdf / .docx)  [REQUIRED]
+#     --cvs         PATH   Directory containing candidate CVs           [REQUIRED]
+#     --api-key     KEY    Gemini API key (or use env var / .env file)  [OPTIONAL]
+#     --output      DIR    Where to write TXT and CSV reports            [OPTIONAL, default: .]
+#     --min-score   N      Flag candidates scoring below N (0-100)       [OPTIONAL]
+#
+# ==============================================================================
+# EXAMPLE COMMANDS
+# ==============================================================================
+#
+#   Example 1 - Minimal (API key already exported as env var):
+#     export GEMINI_API_KEY=AIzaSy...
+#     python main.py --jd job_description.txt --cvs ./resumes/
+#
+#   Example 2 - All options explicitly set:
+#     python main.py \
+#       --jd      job_description.txt \
+#       --cvs     ./resumes/ \
+#       --output  ./reports/ \
+#       --min-score 50 \
+#       --api-key AIzaSy...
+#
+#   Example 3 - Quick test with local sample data:
+#     (test_data/ lives outside the submission zip, not shared per instruction 6c)
+#
+#     export GEMINI_API_KEY=AIzaSy...
+#     python main.py --jd ../../test_data/job_description.txt --cvs ../../test_data/cvs/
+#
+# ==============================================================================
+# EXPECTED OUTPUT
+# ==============================================================================
+#
+#   Terminal prints a live progress log and a ranked summary table, e.g.:
+#
+#     [main] Step 1/4 -- Analysing job description with LLM #1 ...
+#     [main] Step 2/4 -- Parsing candidate CVs ...
+#     [main] Step 3/4 -- Scoring 3 CV(s) with LLM #2 ...
+#     [main] Step 4/4 -- Ranking candidates ...
+#
+#     ========================================================================
+#     Rank  Candidate                   Composite   Overall  Qualified
+#     ------------------------------------------------------------------------
+#     1     alice                            82.3        85  v
+#     2     bob                              61.0        65  v
+#     3     carol                            38.5        42  x
+#     ========================================================================
+#
+#   Two report files are written to --output directory (default: current dir):
+#     cv_ranking_report_<YYYYMMDD_HHMMSS>.txt   ->  Full narrative report
+#     cv_ranking_report_<YYYYMMDD_HHMMSS>.csv   ->  Spreadsheet-ready export
+#
+# ==============================================================================
