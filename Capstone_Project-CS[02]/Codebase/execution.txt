@@ -22,7 +22,7 @@
 #   pip install -r requirements.txt
 #
 #   Packages installed:
-#     google-generativeai  ->  Gemini API client
+#     google-genai         ->  Gemini API client (new SDK)
 #     pypdf                ->  PDF resume parsing
 #     python-docx          ->  Word (.docx) resume parsing
 #     fpdf2                ->  PDF report generation
@@ -82,6 +82,8 @@
 #       --cvs   <path_to_cv_directory>          \
 #       --output  <output_directory>            \
 #       --min-score <0-100>                     \
+#       --llm1  <gemini_model_for_jd_analysis>  \
+#       --llm2  <gemini_model_for_cv_scoring>   \
 #       --api-key   <GEMINI_API_KEY>
 #
 #   ARGUMENTS:
@@ -90,6 +92,8 @@
 #     --api-key     KEY    Gemini API key (or use env var / .env file)  [OPTIONAL]
 #     --output      DIR    Where to write TXT and CSV reports            [OPTIONAL, default: .]
 #     --min-score   N      Flag candidates scoring below N (0-100)       [OPTIONAL]
+#     --llm1        MODEL  Gemini model for JD analysis                  [OPTIONAL, default: gemini-2.5-flash]
+#     --llm2        MODEL  Gemini model for CV scoring loop              [OPTIONAL, default: gemini-2.5-flash]
 #
 # ==============================================================================
 # EXAMPLE COMMANDS
@@ -105,6 +109,8 @@
 #       --cvs     ./resumes/ \
 #       --output  ./reports/ \
 #       --min-score 50 \
+#       --llm1  gemini-2.5-flash \
+#       --llm2  gemini-2.5-flash \
 #       --api-key AIzaSy...
 #
 #   Example 3 - Quick test with local sample data:

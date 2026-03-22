@@ -76,7 +76,7 @@ Output ONLY valid JSON. No markdown, no extra text.
 # Public API
 # ---------------------------------------------------------------------------
 
-def score_cv(candidate: dict, requirements: dict) -> dict:
+def score_cv(candidate: dict, requirements: dict, model: str = SCORER_MODEL) -> dict:
     """
     Score a single candidate CV against the extracted job requirements.
 
@@ -88,6 +88,9 @@ def score_cv(candidate: dict, requirements: dict) -> dict:
         Must contain keys 'name', 'file', and 'text' (raw CV text).
     requirements : dict
         Structured JD requirements from jd_analyzer.analyze_job_description().
+    model : str
+        Gemini model name to use. Defaults to SCORER_MODEL constant.
+        Overridable via the --llm2 CLI argument in main.py.
 
     Returns
     -------
@@ -96,7 +99,7 @@ def score_cv(candidate: dict, requirements: dict) -> dict:
         the full scoring breakdown from the LLM.
     """
     candidate_name = candidate.get("name", "Unknown")
-    print(f"[cv_scorer] Scoring: {candidate_name} (model: {SCORER_MODEL})")
+    print(f"[cv_scorer] Scoring: {candidate_name} (model: {model})")
 
     client = llm_client.get()  # retrieve shared client from llm_client module
 
@@ -113,7 +116,7 @@ def score_cv(candidate: dict, requirements: dict) -> dict:
     # max_output_tokens raised to 4096 to ensure full JSON scoring output is returned.
     # thinking_config budget=0 disables chain-of-thought for fast, deterministic JSON.
     response = client.models.generate_content(
-        model=SCORER_MODEL,
+        model=model,
         contents=prompt,
         config=types.GenerateContentConfig(
             system_instruction=_SYSTEM_INSTRUCTION,
@@ -130,7 +133,7 @@ def score_cv(candidate: dict, requirements: dict) -> dict:
     return {**candidate, "scores": scores}
 
 
-def score_all_cvs(candidates: list[dict], requirements: dict) -> list[dict]:
+def score_all_cvs(candidates: list[dict], requirements: dict, model: str = SCORER_MODEL) -> list[dict]:
     """
     Score every candidate in the list and return the enriched list.
 
@@ -140,6 +143,8 @@ def score_all_cvs(candidates: list[dict], requirements: dict) -> list[dict]:
         List of candidate dicts from resume_parser.parse_resumes_from_directory().
     requirements : dict
         Structured JD requirements from jd_analyzer.analyze_job_description().
+    model : str
+        Gemini model name to use for scoring. Overridable via --llm2 CLI arg.
 
     Returns
     -------
@@ -149,7 +154,7 @@ def score_all_cvs(candidates: list[dict], requirements: dict) -> list[dict]:
     scored: list[dict] = []
     for candidate in candidates:
         try:
-            scored.append(score_cv(candidate, requirements))
+            scored.append(score_cv(candidate, requirements, model=model))
         except Exception as exc:
             print(f"[cv_scorer] Error scoring {candidate.get('name', '?')}: {exc}")
             scored.append({

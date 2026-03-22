@@ -27,7 +27,7 @@ Examples
     # Passing the API key as a CLI argument:
     python main.py --jd jd.pdf --cvs ./resumes/ --api-key AIza... --output ./reports/
 
-Two LLMs are used:
+Two LLMs are used by default (overridable via --llm1 / --llm2):
     LLM #1  gemini-2.5-flash - deep job-description analysis (runs once)
     LLM #2  gemini-2.5-flash - per-CV scoring against requirements (runs per candidate)
 
@@ -84,6 +84,14 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--min-score", type=float, default=None, metavar="N",
         help="Minimum composite score threshold 0-100 (flags candidates below threshold)",
+    )
+    parser.add_argument(
+        "--llm1", default="gemini-2.5-flash", metavar="MODEL",
+        help="Gemini model for JD analysis / LLM #1 (default: gemini-2.5-flash)",
+    )
+    parser.add_argument(
+        "--llm2", default="gemini-2.5-flash", metavar="MODEL",
+        help="Gemini model for CV scoring / LLM #2 (default: gemini-2.5-flash)",
     )
     return parser
 
@@ -162,15 +170,15 @@ def _load_jd_text(jd_path: str) -> str:
     return text.strip()
 
 
-def _print_banner() -> None:
-    """Print a welcome banner to stdout."""
-    banner = """
+def _print_banner(llm1: str, llm2: str) -> None:
+    """Print a welcome banner showing the configured models."""
+    banner = f"""
 +----------------------------------------------------+
 |  CV Sorting using LLMs -- Capstone Project CS[02]  |
 |                                                    |
-|  LLM #1 : gemini-2.5-flash  (JD analysis)         |
-|  LLM #2 : gemini-2.5-flash  (CV scoring loop)     |
-|  Provider: Google Gemini API (free tier)           |
+|  LLM #1 : {llm1:<40}|
+|  LLM #2 : {llm2:<40}|
+|  Provider: Google Gemini API                       |
 +----------------------------------------------------+
     """
     print(banner)
@@ -183,18 +191,19 @@ def _print_banner() -> None:
 def main() -> None:
     """
     Orchestrate the full CV sorting pipeline:
-      1. Parse CLI arguments.
+      1. Parse CLI arguments (including optional --llm1 / --llm2 model overrides).
       2. Resolve and configure Gemini API key.
-      3. Load and analyse the job description (LLM #1 - gemini-2.5-flash, runs once).
+      3. Load and analyse the job description (LLM #1).
       4. Parse all candidate CVs from the given directory.
-      5. Score each CV against the job requirements (LLM #2 - gemini-2.5-flash, per-candidate loop).
+      5. Score each CV against the job requirements (LLM #2, per-candidate loop).
       6. Rank candidates by composite score.
       7. Print results to terminal and write reports to disk.
     """
-    _print_banner()
-
+    # Parse args FIRST so the banner can display the actual chosen model names
     parser = _build_parser()
     args = parser.parse_args()
+
+    _print_banner(llm1=args.llm1, llm2=args.llm2)
 
     # Step 1: Resolve API key and initialise shared Gemini client
     api_key = _resolve_api_key(args.api_key)
@@ -206,9 +215,9 @@ def main() -> None:
     jd_text = _load_jd_text(args.jd)
     print(f"[main] Job description loaded ({len(jd_text)} characters).")
 
-    # Step 3: Analyse JD with LLM #1 (gemini-2.5-flash)
-    print("\n[main] Step 1/4 -- Analysing job description with LLM #1 (gemini-2.5-flash) ...")
-    requirements = analyze_job_description(jd_text)
+    # Step 3: Analyse JD with LLM #1 (model chosen via --llm1)
+    print(f"\n[main] Step 1/4 -- Analysing job description with LLM #1 ({args.llm1}) ...")
+    requirements = analyze_job_description(jd_text, model=args.llm1)
     print(f"[main] Job title detected : {requirements.get('title', 'N/A')}")
     print(f"[main] Must-have skills   : {len(requirements.get('must_have', []))} extracted")
     print(f"[main] Keywords           : {len(requirements.get('keywords', []))} extracted")
@@ -221,9 +230,9 @@ def main() -> None:
         sys.exit(1)
     print(f"[main] {len(candidates)} candidate(s) loaded.")
 
-    # Step 5: Score each CV with LLM #2 (gemini-2.5-flash, per-candidate loop)
-    print(f"\n[main] Step 3/4 -- Scoring {len(candidates)} CV(s) with LLM #2 (gemini-2.5-flash) ...")
-    scored_candidates = score_all_cvs(candidates, requirements)
+    # Step 5: Score each CV with LLM #2 (model chosen via --llm2)
+    print(f"\n[main] Step 3/4 -- Scoring {len(candidates)} CV(s) with LLM #2 ({args.llm2}) ...")
+    scored_candidates = score_all_cvs(candidates, requirements, model=args.llm2)
 
     # Step 6: Rank candidates
     print("\n[main] Step 4/4 -- Ranking candidates ...")

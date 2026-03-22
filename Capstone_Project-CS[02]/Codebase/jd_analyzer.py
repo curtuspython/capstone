@@ -61,7 +61,7 @@ Job Description:
 # Public API
 # ---------------------------------------------------------------------------
 
-def analyze_job_description(jd_text: str) -> dict:
+def analyze_job_description(jd_text: str, model: str = JD_MODEL) -> dict:
     """
     Extract structured hiring criteria from a job description.
 
@@ -71,6 +71,9 @@ def analyze_job_description(jd_text: str) -> dict:
     ----------
     jd_text : str
         Raw text of the job description.
+    model : str
+        Gemini model name to use. Defaults to JD_MODEL constant.
+        Overridable via the --llm1 CLI argument in main.py.
 
     Returns
     -------
@@ -83,7 +86,7 @@ def analyze_job_description(jd_text: str) -> dict:
     ValueError
         If the LLM response cannot be parsed as valid JSON.
     """
-    print(f"[jd_analyzer] Analysing JD with model: {JD_MODEL}")
+    print(f"[jd_analyzer] Analysing JD with model: {model}")
 
     client = llm_client.get()  # retrieve shared client from llm_client module
 
@@ -94,7 +97,7 @@ def analyze_job_description(jd_text: str) -> dict:
     # default which can starve the actual JSON output at low limits.
     # thinking_config budget=0 disables chain-of-thought for fast, deterministic JSON.
     response = client.models.generate_content(
-        model=JD_MODEL,
+        model=model,
         contents=prompt,
         config=types.GenerateContentConfig(
             system_instruction=_SYSTEM_INSTRUCTION,
