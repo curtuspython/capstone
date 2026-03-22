@@ -1,0 +1,19 @@
+# CV Sorting using LLMs - CS[02] - Execution Instructions
+# --------------------------------------------------------
+# Prerequisites:
+#   pip install groq pypdf python-docx fpdf2
+#
+# Set your Groq API key (free at https://console.groq.com/):
+#   export GROQ_API_KEY=gsk_your_key_here
+#
+# Basic execution:
+#   python main.py --jd <path_to_job_description> --cvs <path_to_cv_directory>
+#
+# Full example with all options:
+#   python main.py --jd job_description.txt --cvs ./resumes/ --output ./reports/ --min-score 50
+#
+# Passing API key as argument (instead of env var):
+#   python main.py --jd job_description.txt --cvs ./resumes/ --api-key gsk_your_key_here
+#
+# Minimal one-liner:
+python main.py --jd job_description.txt --cvs ./resumes/

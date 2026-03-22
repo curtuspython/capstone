@@ -1,0 +1,27 @@
+JOB TITLE: Senior Python Backend Developer
+COMPANY: InnovateTech Solutions
+LOCATION: Remote
+
+ABOUT THE ROLE:
+We are looking for an experienced Senior Python Backend Developer to design, build,
+and maintain scalable backend services for our SaaS platform.
+
+RESPONSIBILITIES:
+- Design and develop RESTful APIs and microservices using Python (FastAPI/Django).
+- Architect scalable backend systems on AWS cloud infrastructure.
+- Implement CI/CD pipelines and deployment automation.
+- Conduct code reviews and mentor junior developers.
+- Optimize database queries and manage PostgreSQL/Redis data stores.
+
+REQUIRED QUALIFICATIONS:
+- 5+ years of professional Python backend development experience.
+- Strong experience with FastAPI or Django REST Framework.
+- Proficiency with PostgreSQL, Redis, and database optimization.
+- Experience with Docker, Kubernetes, and AWS (EC2, ECS, Lambda, S3).
+- Bachelor's degree in Computer Science or related field.
+
+PREFERRED QUALIFICATIONS:
+- Master's degree in Computer Science.
+- AWS certification.
+- Experience with Apache Kafka or message queues.
+- Team leadership experience.

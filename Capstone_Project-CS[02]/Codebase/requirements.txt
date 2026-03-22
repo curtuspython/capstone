@@ -1,0 +1,13 @@
+# CV Sorting using LLMs (CS[02]) — Python Dependencies
+# Install with:
+#   pip install -r requirements.txt
+
+# LLM API client (Groq)
+groq
+
+# Resume parsing
+pypdf          # PDF parsing
+python-docx    # Word (.docx) parsing
+
+# PDF report generation
+fpdf2

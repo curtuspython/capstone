@@ -1,0 +1,18 @@
+# Gitignore for CS[02] CV Sorting project
+
+# Python virtual environments
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Generated output reports (these are outputs, not source)
+cv_ranking_report_*.txt
+cv_ranking_report_*.csv
+
+# macOS junk
+.DS_Store
+
+# Submission zip
+*.zip
