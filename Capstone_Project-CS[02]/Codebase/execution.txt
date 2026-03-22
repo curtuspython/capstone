@@ -114,8 +114,8 @@
 #     --api-key     KEY    Gemini API key (or use env var / .env file)  [OPTIONAL]
 #     --output      DIR    Where to write TXT and CSV reports            [OPTIONAL, default: .]
 #     --min-score   N      Flag candidates scoring below N (0-100)       [OPTIONAL]
-#     --llm1        MODEL  Gemini model for JD analysis                  [OPTIONAL, default: gemini-2.5-pro]
-#     --llm2        MODEL  Gemini model for CV scoring loop              [OPTIONAL, default: gemini-2.5-flash]
+#     --llm1        MODEL  Gemini model for JD analysis                  [OPTIONAL, default: gemini-2.5-flash]
+#     --llm2        MODEL  Gemini model for CV scoring loop              [OPTIONAL, default: gemini-2.5-pro]
 #
 # ==============================================================================
 # EXAMPLE COMMANDS
@@ -131,8 +131,8 @@
 #       --cvs     ./resumes/ \
 #       --output  ./reports/ \
 #       --min-score 50 \
-#       --llm1  gemini-2.5-pro \
-#       --llm2  gemini-2.5-flash \
+#       --llm1  gemini-2.5-flash \
+#       --llm2  gemini-2.5-pro \
 #       --api-key AIzaSy...
 #
 #   Example 3 - Override both models to flash for faster/cheaper runs:

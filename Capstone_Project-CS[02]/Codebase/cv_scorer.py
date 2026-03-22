@@ -1,7 +1,7 @@
 """
 cv_scorer.py
 ------------
-Uses LLM #2 (Google Gemini: gemini-2.5-flash) to score a single candidate
+Uses LLM #2 (Google Gemini: gemini-2.5-pro) to score a single candidate
 CV against the structured job requirements extracted by jd_analyzer.py (LLM #1).
 
 For each CV the LLM returns:
@@ -14,10 +14,11 @@ For each CV the LLM returns:
   - gaps               : list[str] (top 3 missing areas)
   - recommendation     : str  (1-2 sentence recruiter note)
 
-LLM #1 (gemini-2.5-pro)   -- deep semantic JD analysis, runs once per session.
-LLM #2 (gemini-2.5-flash) -- fast per-CV scoring, runs once per candidate.
-Using a heavier model for the complex one-time analysis and a lighter, faster
-model for the repeated scoring loop is a standard two-LLM pipeline pattern.
+LLM #1 (gemini-2.5-flash) -- fast structured JD extraction, runs once per session.
+LLM #2 (gemini-2.5-pro)   -- deep CV assessment with nuanced judgment, runs per candidate.
+The Pro model is deliberately placed here because CV scoring is the high-complexity,
+high-stakes task: it must infer skills from experience, compare two documents, and
+produce calibrated scores that directly determine the final hiring ranking.
 """
 
 import json
@@ -31,11 +32,13 @@ import llm_client
 # Constants
 # ---------------------------------------------------------------------------
 
-# LLM #2 - gemini-2.5-flash: a lighter, faster model used in the per-CV
-# scoring loop. Thinking disabled for fast, deterministic JSON output.
-# Deliberately different from LLM #1 (gemini-2.5-pro): the Pro model handles
-# the complex one-time JD analysis; Flash handles the repeated scoring loop.
-SCORER_MODEL = "gemini-2.5-flash"
+# LLM #2 - gemini-2.5-pro: the most capable Gemini model, placed here because
+# CV scoring is the highest-complexity task in the pipeline. The model must
+# read a full CV, infer skills from described experience, compare against job
+# requirements, and produce calibrated numeric scores that determine the final
+# ranking. Accuracy here matters most -- wrong scores = wrong hiring decision.
+# Pro's thinking mode is allowed to run freely for nuanced judgment.
+SCORER_MODEL = "gemini-2.5-pro"
 
 _SYSTEM_INSTRUCTION = (
     "You are a senior technical recruiter. "
@@ -116,16 +119,18 @@ def score_cv(candidate: dict, requirements: dict, model: str = SCORER_MODEL) -> 
     )
 
     # Call the new google-genai SDK: system_instruction lives in GenerateContentConfig.
-    # max_output_tokens raised to 4096 to ensure full JSON scoring output is returned.
-    # thinking_config budget=0 disables chain-of-thought for fast, deterministic JSON.
+    # No thinking_config: gemini-2.5-pro requires thinking mode (budget=0 is rejected).
+    # Letting Pro think freely is desirable here -- this is the high-stakes judgment
+    # step where reasoning depth directly improves scoring accuracy.
+    # temperature=1.0 is required when thinking mode is active on Pro.
+    # max_output_tokens set high to accommodate thinking tokens + JSON output.
     response = client.models.generate_content(
         model=model,
         contents=prompt,
         config=types.GenerateContentConfig(
             system_instruction=_SYSTEM_INSTRUCTION,
-            temperature=0.15,
-            max_output_tokens=4096,
-            thinking_config=types.ThinkingConfig(thinking_budget=0),
+            temperature=1.0,
+            max_output_tokens=16000,
         ),
     )
 

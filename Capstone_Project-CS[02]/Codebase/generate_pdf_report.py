@@ -152,8 +152,8 @@ def build_report() -> None:
     tech_rows = [
         ("Python 3.11+",              "Core language"),
         ("Google Gemini API",         "Hosted LLM inference via Google AI Studio"),
-        ("gemini-2.5-pro",   "LLM #1 -- JD analysis (runs once, deep semantic extraction)"),
-        ("gemini-2.5-flash", "LLM #2 -- CV scoring (runs once per candidate, fast loop)"),
+        ("gemini-2.5-flash", "LLM #1 -- JD extraction (runs once, moderate complexity)"),
+        ("gemini-2.5-pro",   "LLM #2 -- CV scoring (runs per candidate, high complexity)"),
         ("pypdf",                     "PDF resume parsing"),
         ("python-docx",               "Word (.docx) resume parsing"),
         ("fpdf2",                     "PDF report generation"),
@@ -181,20 +181,21 @@ def build_report() -> None:
 
     _h2(pdf, "4.3  Two-LLM Pipeline")
     _body(pdf,
-        "Step 1 -- LLM #1 (gemini-2.5-pro) reads the full job "
-        "description and returns a structured JSON object containing mandatory "
-        "skills, preferred qualifications, minimum experience, domain keywords, "
-        "and a role summary. gemini-2.5-pro is the most capable model in the "
-        "Gemini family and is chosen here because this step is complex and runs "
-        "only once per job opening."
+        "Step 1 -- LLM #1 (gemini-2.5-flash) reads the full job description "
+        "and returns a structured JSON object containing mandatory skills, "
+        "preferred qualifications, minimum experience, domain keywords, and a "
+        "role summary. This is a moderate-complexity structured extraction task "
+        "that Flash handles accurately and efficiently. It runs only once per "
+        "job opening."
     )
     _body(pdf,
-        "Step 2 -- LLM #2 (gemini-2.5-flash) is invoked once per candidate. "
-        "It receives the structured requirements and the candidate's CV text, "
-        "and returns numeric scores across four dimensions along with strengths, "
-        "gaps, and a recruiter recommendation. gemini-2.5-flash is a lighter, "
-        "faster model deliberately chosen for this repeated loop -- it delivers "
-        "consistent JSON output at lower latency than the Pro model."
+        "Step 2 -- LLM #2 (gemini-2.5-pro) is invoked once per candidate. "
+        "It receives the structured requirements and the full CV text, and must "
+        "infer skills from described experience, compare two documents, and "
+        "produce calibrated numeric scores across four dimensions plus narrative "
+        "feedback. This is the highest-complexity, highest-stakes step in the "
+        "pipeline -- wrong scores mean wrong hiring decisions -- so the most "
+        "capable model is deliberately assigned here."
     )
 
     _h2(pdf, "4.4  Composite Scoring Formula")

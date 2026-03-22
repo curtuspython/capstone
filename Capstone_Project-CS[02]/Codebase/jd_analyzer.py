@@ -1,7 +1,7 @@
 """
 jd_analyzer.py
 --------------
-Uses LLM #1 (Google Gemini: gemini-2.5-pro) to extract structured
+Uses LLM #1 (Google Gemini: gemini-2.5-flash) to extract structured
 requirements from a raw job description text.
 
 The LLM parses the job description and returns a JSON object with:
@@ -27,10 +27,12 @@ import llm_client
 # Constants
 # ---------------------------------------------------------------------------
 
-# LLM #1 - gemini-2.5-pro: the most capable Gemini model, used for deep
-# semantic extraction of the job description. Runs only ONCE per session so
-# the higher-capability (and higher-cost) model is fully justified here.
-JD_MODEL = "gemini-2.5-pro"
+# LLM #1 - gemini-2.5-flash: fast, efficient model used for structured
+# extraction from the job description. This task is moderate complexity --
+# pulling a fixed JSON schema out of a short document -- and Flash handles
+# it accurately. Runs only ONCE per session so speed is a bonus, not a need.
+# thinking_budget=0 disables chain-of-thought for fast, deterministic JSON.
+JD_MODEL = "gemini-2.5-flash"
 
 _SYSTEM_INSTRUCTION = (
     "You are an expert HR consultant and technical recruiter. "
@@ -94,17 +96,16 @@ def analyze_job_description(jd_text: str, model: str = JD_MODEL) -> dict:
     prompt = _USER_PROMPT_TEMPLATE.format(jd_text=jd_text[:8000])  # guard token limit
 
     # Call the new google-genai SDK: system_instruction lives in GenerateContentConfig.
-    # No thinking_config here: gemini-2.5-pro REQUIRES thinking mode (budget=0 is
-    # rejected with INVALID_ARGUMENT). We let the Pro model think freely, which
-    # actually improves the quality of JD requirement extraction.
-    # max_output_tokens set high to accommodate thinking + JSON output tokens.
+    # thinking_budget=0 disables chain-of-thought: JD extraction is structured
+    # information retrieval, not deep reasoning -- fast deterministic JSON is ideal.
     response = client.models.generate_content(
         model=model,
         contents=prompt,
         config=types.GenerateContentConfig(
             system_instruction=_SYSTEM_INSTRUCTION,
-            temperature=1.0,        # required value when thinking mode is active
-            max_output_tokens=16000,
+            temperature=0.1,        # low temp -> consistent, deterministic output
+            max_output_tokens=8192,
+            thinking_config=types.ThinkingConfig(thinking_budget=0),
         ),
     )
 
