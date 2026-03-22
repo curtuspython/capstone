@@ -124,58 +124,6 @@ _DEGREE_KEYWORDS = [
 
 
 # ---------------------------------------------------------------------------
-# Name-extraction helpers  (used by _ner_person)
-# ---------------------------------------------------------------------------
-
-# Words that appear in CV headers right after a name but are NOT part of it.
-# e.g. "DAVID CHEN Email" → strip "Email" → "DAVID CHEN"
-_HEADER_NOISE = frozenset({
-    "email", "phone", "mobile", "tel", "linkedin", "github", "twitter",
-    "instagram", "address", "contact", "website", "portfolio", "resume",
-    "cv", "curriculum", "vitae", "profile", "objective", "summary", "name",
-    "at", "the", "page",
-})
-
-
-def _looks_like_name(text: str) -> bool:
-    """
-    Return True if ``text`` looks like a human name.
-
-    Rules:
-      - 2 to 4 space-separated words
-      - Every word contains only letters, hyphens, or apostrophes  (no dots,
-        no digits -- rules out things like 'Vue.js' or 'Python3')
-      - At least two words must be longer than 1 character
-        (rules out initials-only like 'A B')
-      - No word may be a known header-noise term (Email, Phone, LinkedIn, ...)
-    """
-    parts = text.strip().split()
-    if not (2 <= len(parts) <= 4):
-        return False
-    if not all(re.match(r"^[A-Za-z][A-Za-z'\-]*$", p) for p in parts):
-        return False
-    # Require at least 2 words longer than 1 char to avoid 'A B' style initials
-    if sum(1 for p in parts if len(p) > 1) < 2:
-        return False
-    # Reject if any word is a known header-noise label (e.g. 'Email', 'Phone')
-    if any(p.lower() in _HEADER_NOISE for p in parts):
-        return False
-    return True
-
-
-def _clean_ner_name(raw: str) -> str:
-    """
-    Strip trailing header-noise words from a spaCy NER-extracted name.
-
-    e.g. ``'DAVID CHEN Email'`` → ``'DAVID CHEN'``
-    """
-    words = raw.split()
-    while words and words[-1].lower().rstrip(":.|") in _HEADER_NOISE:
-        words.pop()
-    return " ".join(words)
-
-
-# ---------------------------------------------------------------------------
 # Public helpers
 # ---------------------------------------------------------------------------
 
@@ -276,14 +224,8 @@ def _extract_with_spacy_ner(file_path: str, text: str) -> dict:
 
     text_lower = text.lower()
 
-    # -- Name: use three-strategy extractor; fall back to filename stem -------
-    name = _ner_person(text)
-    if not name:
-        # Last resort: use the filename stem but clean underscores/dashes
-        name = Path(file_path).stem.replace("_", " ").replace("-", " ").title()
-        print(
-            f"[resume_parser] Name not found in header; using filename: '{name}'"
-        )
+    # -- Name: first PERSON entity in the resume header (top 500 chars) -------
+    name = _ner_person(text) or stem
 
     # -- Email ----------------------------------------------------------------
     email_match = re.search(
@@ -346,59 +288,18 @@ def _extract_with_spacy_ner(file_path: str, text: str) -> dict:
 
 def _ner_person(text: str) -> str:
     """
-    Extract a clean candidate name from the top of a resume.
+    Return the first PERSON named entity from the resume header (spaCy NER).
 
-    Three strategies applied in order (first that succeeds wins):
-
-    Strategy 1 -- First non-empty line heuristic.
-        Most well-formatted CVs put the candidate's name on the very first
-        line.  If the first non-empty line passes ``_looks_like_name`` it is
-        returned immediately (title-cased).  This handles ALL-CAPS headers
-        like ``ALICE JOHNSON`` without needing NER at all.
-
-    Strategy 2 -- spaCy NER on header with noise cleaning.
-        Run spaCy NER on the first 600 characters.  For each PERSON entity
-        found, strip trailing header-noise words (Email, Phone, LinkedIn,…)
-        using ``_clean_ner_name``, then validate with ``_looks_like_name``.
-        Filters out false positives such as framework names (``Vue.js``) or
-        label bleed (``DAVID CHEN Email``).
-
-    Strategy 3 -- Scan first 10 lines for any name-like line.
-        Fallback scan for cases where the name is not on line 1 but appears
-        within the first few lines of the document header.
-
-    Returns
-    -------
-    str
-        A cleaned, title-cased name string, or ``''`` if nothing matched.
+    Scans only the first 500 characters where the candidate name typically
+    appears.  Returns empty string if spaCy is unavailable or no PERSON found.
     """
-    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-
-    # Strategy 1: first non-empty line looks like a name?
-    if lines and _looks_like_name(lines[0]):
-        return lines[0].title()
-
-    # Strategy 2: spaCy NER with noise stripping on header block
     nlp = _get_nlp()
-    if nlp is not None:
-        header = "\n".join(lines[:12])[:600]  # top of document
-        doc = nlp(header)
-        for ent in doc.ents:
-            if ent.label_ == "PERSON":
-                cleaned = _clean_ner_name(ent.text.strip())
-                if cleaned and _looks_like_name(cleaned):
-                    return cleaned.title()
-
-    # Strategy 3: scan first 10 lines for any name-like line
-    for line in lines[:10]:
-        # Strip common label prefixes ("Name: Alice Johnson")
-        candidate = re.sub(
-            r"^(?:name|candidate|applicant)\s*[:\-]\s*",
-            "", line, flags=re.IGNORECASE,
-        ).strip()
-        if _looks_like_name(candidate):
-            return candidate.title()
-
+    if nlp is None:
+        return ""
+    doc = nlp(text[:500])
+    for ent in doc.ents:
+        if ent.label_ == "PERSON":
+            return ent.text.strip()
     return ""
 
 
