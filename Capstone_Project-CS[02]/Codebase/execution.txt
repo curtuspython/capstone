@@ -298,20 +298,21 @@
 #   [main] Step 3/4 -- Scoring 6 CV(s) with LLM #2 ...
 #   [main] Step 4/4 -- Ranking candidates (+ LlamaIndex semantic matching) ...
 #
-#   [ranker] Semantic (TF-IDF, normalised) -- Frank Osei:      97.5
-#   [ranker] Semantic (TF-IDF, normalised) -- Alice Johnson:   96.8
+#   [ranker] Semantic (TF-IDF, normalised) -- ALICE JOHNSON:    96.0
+#   [ranker] Semantic (TF-IDF, normalised) -- FRANK OSEI:       95.7
 #   ...
 #
-#   ==============================================================================
-#   Rank  Candidate         Composite  Semantic  Overall  Qualified
-#   ------------------------------------------------------------------------------
-#   1     Frank Osei            97.9     97.5      99      YES
-#   2     Alice Johnson         95.4     96.8      98      YES
-#   3     David Chen            89.7    100.0      90      borderline
-#   4     Carol Martinez        55.4     71.8      58      NO
-#   5     Emily Rodriguez       13.0     24.8      12      NO
-#   6     Bob Smith              6.0     10.0       5      NO
-#   ==============================================================================
+#   ================================================================
+#   #   Candidate              Composite   Semantic   Overall
+#   ----------------------------------------------------------------
+#   1   ALICE JOHNSON               99.2       96.0       100
+#   2   FRANK OSEI                  98.9       95.7        99
+#   3   ALICE JOHNSON               97.9       95.6        98
+#   4   DAVID CHEN                  90.5      100.0        92
+#   5   CAROL MARTINEZ              53.2       71.0        50
+#   6   EMILY RODRIGUEZ             12.8       27.0        12
+#   7   BOB SMITH                    8.9       10.0        10
+#   ================================================================
 #
 #   [main] Full Report:
 #
@@ -330,6 +331,45 @@
 #
 #   NOTE: No files are written.  To save a copy, run with --interactive
 #   and use the 'export' command after reviewing the terminal output.
+#
+# ==============================================================================
+# RECENT CHANGES & FIXES
+# ==============================================================================
+#
+#   1. NAME EXTRACTION FIX (resume_parser.py):
+#      - Added a first-line heuristic that reads the candidate's name from
+#        the first non-empty line of the CV (most CVs place the name there).
+#      - Handles PDF-extracted text where contact info is on the same line
+#        as the name (e.g. "ALICE JOHNSON Email: alice@... | Phone: ...").
+#      - Sanitised spaCy NER output to strip embedded newlines and trailing
+#        noise words (e.g. "DAVID CHEN\nEmail" -> "DAVID CHEN").
+#
+#   2. WARNING SUPPRESSION (main.py + resume_parser.py):
+#      - Suppressed RequestsDependencyWarning, DeprecationWarning,
+#        FutureWarning, and charset_normalizer warnings via Python's
+#        warnings module in main.py.
+#      - Suppressed NLTK [nltk_data] SSL certificate error messages using
+#        OS-level file descriptor redirection (os.dup2 to /dev/null) in
+#        resume_parser.py, since NLTK writes directly to C-level fd 2.
+#
+#   3. SIMPLIFIED SUMMARY TABLE (report_generator.py):
+#      - Removed MustHave, NiceHave, Exp, and Keyword columns from the
+#        candidate ranking summary table.  The table now shows only:
+#        Rank, Candidate, Composite, Semantic, Overall.
+#      - Individual dimension scores are still available via 'show <rank>'
+#        in interactive mode and in the detailed candidate profiles.
+#
+#   4. COMPREHENSIVE CODE COMMENTS:
+#      - Added docstrings and inline comments to every function and key
+#        logic block across all modules (main.py, llm_client.py,
+#        resume_parser.py, jd_analyzer.py, cv_scorer.py, ranker.py,
+#        report_generator.py, generate_pdf_report.py).
+#
+#   5. PDF REPORT REDESIGN (generate_pdf_report.py):
+#      - Redesigned with a subtle, professional colour palette (charcoal +
+#        muted teal accents on white) replacing the previous vibrant blue.
+#      - Updated terminal screenshots to show actual ranking results.
+#      - Minimum font size: 12pt.  Total: 3 pages.
 #
 # ==============================================================================
 # SYSTEM ARCHITECTURE

@@ -97,10 +97,13 @@ def analyze_job_description(jd_text: str, model: str = JD_MODEL) -> dict:
     """
     print(f"[jd_analyzer] Analysing JD with LangChain + model: {model}")
 
-    # Retrieve LangChain-wrapped Gemini LLM from shared client module
+    # Step 1: Retrieve a LangChain-wrapped Gemini LLM from the shared client.
+    # Temperature is low (0.1) for deterministic, structured output.
     llm = llm_client.get_langchain_llm(model=model, temperature=0.1)
 
-    # Build LangChain chain: prompt → LLM → structured JSON parser
+    # Step 2: Build the LangChain chain.
+    # The chain flows:  ChatPromptTemplate -> Gemini LLM -> JsonOutputParser.
+    # The parser automatically extracts the JSON object from the LLM response.
     prompt = ChatPromptTemplate.from_messages([
         ("system", _SYSTEM_INSTRUCTION),
         ("human", _USER_PROMPT),
@@ -108,11 +111,15 @@ def analyze_job_description(jd_text: str, model: str = JD_MODEL) -> dict:
     parser = JsonOutputParser()
     chain = prompt | llm | parser
 
+    # Step 3: Invoke the chain.  JD text is truncated to 8000 chars as a
+    # safety measure to stay within the LLM's context window.
     try:
         result = chain.invoke({"jd_text": jd_text[:8000]})
         print(f"[jd_analyzer] LangChain chain completed successfully.")
         return result
     except Exception as exc:
+        # LangChain failed (network, parsing, etc.) — fall back to calling
+        # the Gemini API directly without LangChain orchestration.
         print(f"[jd_analyzer] LangChain chain failed, falling back to direct API: {exc}")
         return _fallback_direct_api(jd_text, model)
 
@@ -124,22 +131,42 @@ def analyze_job_description(jd_text: str, model: str = JD_MODEL) -> dict:
 def _fallback_direct_api(jd_text: str, model: str) -> dict:
     """
     Fallback: call the Gemini API directly if the LangChain chain fails.
+
+    Bypasses LangChain entirely and sends the prompt directly to the
+    google-genai SDK client.  The raw text response is parsed as JSON
+    manually via _parse_json_response().
+
+    Parameters
+    ----------
+    jd_text : str
+        Raw job description text.
+    model : str
+        Gemini model name to use.
+
+    Returns
+    -------
+    dict
+        Parsed JSON dict with the same keys as the LangChain chain output.
     """
     from google.genai import types
 
+    # Use the default genai.Client (v1beta) for generate_content
     client = llm_client.get()
+    # Format the prompt template with the actual JD text
     prompt = _USER_PROMPT.format(jd_text=jd_text[:8000])
 
+    # Call the Gemini API directly (no LangChain)
     response = client.models.generate_content(
         model=model,
         contents=prompt,
         config=types.GenerateContentConfig(
             system_instruction=_SYSTEM_INSTRUCTION,
-            temperature=0.1,
-            max_output_tokens=8192,
+            temperature=0.1,        # low temperature for deterministic output
+            max_output_tokens=8192,  # generous limit for the JSON response
         ),
     )
 
+    # Parse the raw text response as JSON
     raw_output = response.text.strip()
     return _parse_json_response(raw_output, label="JD analysis")
 
@@ -148,21 +175,41 @@ def _parse_json_response(raw: str, label: str = "response") -> dict:
     """
     Robustly parse a JSON object from an LLM response string.
 
-    Strips markdown code fences if present before parsing.
+    LLMs often wrap JSON in ```json ... ``` markdown fences.  This function
+    strips those fences, then attempts json.loads().  If that fails, it
+    tries to extract the first {...} block as a last resort.
+
+    Parameters
+    ----------
+    raw : str
+        Raw LLM response text.
+    label : str
+        Human-readable label for error messages.
+
+    Returns
+    -------
+    dict
+        Parsed JSON object.
+
+    Raises
+    ------
+    ValueError
+        If no valid JSON can be extracted from the response.
     """
-    # Strip markdown code fences  ```json ... ```
+    # Strip markdown code fences (```json ... ```) that LLMs often add
     cleaned = re.sub(r"```(?:json)?\s*", "", raw).strip().rstrip("`").strip()
 
     try:
         return json.loads(cleaned)
     except json.JSONDecodeError as exc:
-        # Try to extract the first {...} block as a fallback
+        # Fallback: try to extract the first JSON object {...} from the text
         match = re.search(r"\{.*\}", cleaned, re.DOTALL)
         if match:
             try:
                 return json.loads(match.group())
             except json.JSONDecodeError:
                 pass
+        # All parsing attempts failed — raise an informative error
         raise ValueError(
             f"[jd_analyzer] Failed to parse {label} as JSON.\n"
             f"Raw output:\n{raw}\n"

@@ -160,7 +160,7 @@ def build_docx() -> None:
         "as the semantic matching framework. Resume extraction uses a two-tier "
         "strategy: pyresparser (project requirement) is attempted first; spaCy "
         "3.x NER + regex serves as the automatic fallback for Python 3.11+ "
-        "compatibility. Semantic similarity scoring uses a three-tier fallback: "
+        "compatibility. Semantic similarity scoring uses a four-tier fallback: "
         "Gemini text-embedding-004 -> TF-IDF cosine similarity (scikit-learn) -> "
         "neutral default, ensuring real differentiated scores are always produced. "
         "Results are exported as TXT/CSV reports with a fully interactive terminal mode."
@@ -267,7 +267,7 @@ def build_docx() -> None:
         "dimensions plus strengths, gaps, and a recruiter recommendation."
     )
     _add_body(doc,
-        "Step 4 -- Semantic Matching (LlamaIndex framework, three-tier fallback): "
+        "Step 4 -- Semantic Matching (LlamaIndex framework, four-tier fallback): "
         "Tier 1 uses Gemini text-embedding-004 via google-genai SDK to embed the "
         "JD and each CV, computing cosine similarity as semantic_score (0-100). "
         "If Gemini embeddings fail (API version mismatch / quota), Tier 2 uses "

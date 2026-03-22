@@ -27,6 +27,7 @@ File format support:
 """
 
 import re
+import sys
 from pathlib import Path
 
 try:
@@ -46,19 +47,63 @@ except ImportError:  # pragma: no cover
 # failure here so the fallback to Tier 2 is transparent.
 # ---------------------------------------------------------------------------
 _HAS_PYRESPARSER = False
-try:
-    # NLTK data needed by pyresparser
-    import nltk as _nltk
-    for _r in ("stopwords", "punkt", "averaged_perceptron_tagger", "punkt_tab"):
-        _nltk.download(_r, quiet=True)
-    from pyresparser import ResumeParser as _PyResParser  # noqa: PLC0415
-    # Smoke-test: pyresparser registers a custom spaCy component at import
-    # time.  If [E053] is going to fire it fires here.
+
+def _try_load_pyresparser():
+    """
+    Attempt to load pyresparser with full noise suppression.
+
+    NLTK writes download/error messages directly to C-level file descriptors,
+    so Python-level sys.stderr redirection is not enough.  We redirect at the
+    OS file-descriptor level using os.dup2 to silence everything.
+    """
+    import os
+    import io as _io
+
+    # Save real file descriptors
+    _saved_stdout_fd = os.dup(1)
+    _saved_stderr_fd = os.dup(2)
+    _devnull = os.open(os.devnull, os.O_WRONLY)
+
+    try:
+        # Redirect fd 1 and 2 to /dev/null
+        os.dup2(_devnull, 1)
+        os.dup2(_devnull, 2)
+        _old_out, _old_err = sys.stdout, sys.stderr
+        sys.stdout = _io.StringIO()
+        sys.stderr = _io.StringIO()
+
+        import nltk
+        for _r in ("stopwords", "punkt", "averaged_perceptron_tagger", "punkt_tab"):
+            try:
+                nltk.download(_r, quiet=True)
+            except Exception:
+                pass
+        from pyresparser import ResumeParser as _PyResParser
+
+        # Restore everything
+        sys.stdout, sys.stderr = _old_out, _old_err
+        os.dup2(_saved_stdout_fd, 1)
+        os.dup2(_saved_stderr_fd, 2)
+        return _PyResParser
+
+    except Exception:
+        # Restore everything on failure
+        sys.stdout, sys.stderr = _old_out, _old_err
+        os.dup2(_saved_stdout_fd, 1)
+        os.dup2(_saved_stderr_fd, 2)
+        return None
+    finally:
+        os.close(_devnull)
+        os.close(_saved_stdout_fd)
+        os.close(_saved_stderr_fd)
+
+_PyResParser = _try_load_pyresparser()
+if _PyResParser is not None:
     _HAS_PYRESPARSER = True
     print("[resume_parser] pyresparser loaded successfully (Tier 1 active).")
-except Exception as _e:
+else:
     print(
-        f"[resume_parser] pyresparser unavailable ({type(_e).__name__}: {_e}) "
+        "[resume_parser] pyresparser unavailable "
         "\u2014 using spaCy 3.x NER fallback (Tier 2)."
     )
 
@@ -70,21 +115,36 @@ _NLP = None  # lazy-loaded in _get_nlp()
 
 
 def _get_nlp():
-    """Return the shared spaCy NLP model, loading/downloading on first call."""
+    """
+    Return the shared spaCy NLP model, loading or downloading on first call.
+
+    Uses lazy initialisation: the model is loaded once and cached in the
+    module-level _NLP variable.  If the 'en_core_web_sm' model is not
+    installed, it is auto-downloaded via spacy.cli.download().
+
+    Returns
+    -------
+    spacy.Language or None
+        The loaded NLP model, or None if spaCy is not available.
+    """
     global _NLP
+    # Return cached model if already loaded
     if _NLP is not None:
         return _NLP
     try:
         import spacy  # noqa: PLC0415
         try:
+            # Attempt to load the pre-installed English model
             _NLP = spacy.load("en_core_web_sm")
         except OSError:
+            # Model not found — download it automatically (one-time operation)
             print("[resume_parser] Downloading spaCy model 'en_core_web_sm' (one-time) ...")
             from spacy.cli import download as _dl  # noqa: PLC0415
             _dl("en_core_web_sm")
             _NLP = spacy.load("en_core_web_sm")
         return _NLP
     except Exception as exc:  # pragma: no cover
+        # spaCy itself is not installed or broken — NER will be unavailable
         print(f"[resume_parser] spaCy unavailable ({exc}); NER extraction disabled.")
         return None
 
@@ -142,8 +202,9 @@ def extract_text_from_file(file_path: str) -> str:
         The extracted plain text, or an empty string on failure.
     """
     path = Path(file_path)
-    suffix = path.suffix.lower()
+    suffix = path.suffix.lower()  # normalise extension for comparison
 
+    # Dispatch to the appropriate parser based on file extension
     if suffix == ".pdf":
         return _parse_pdf(path)
     elif suffix == ".docx":
@@ -151,6 +212,7 @@ def extract_text_from_file(file_path: str) -> str:
     elif suffix in (".txt", ".md"):
         return _parse_txt(path)
     else:
+        # Unsupported format — log and return empty string (file is skipped)
         print(f"[resume_parser] Unsupported file format: {suffix} — skipping {path.name}")
         return ""
 
@@ -224,8 +286,8 @@ def _extract_with_spacy_ner(file_path: str, text: str) -> dict:
 
     text_lower = text.lower()
 
-    # -- Name: first PERSON entity in the resume header (top 500 chars) -------
-    name = _ner_person(text) or stem
+    # -- Name: first-line heuristic then NER fallback -----------------------
+    name = _name_from_first_line(text) or _ner_person(text) or stem
 
     # -- Email ----------------------------------------------------------------
     email_match = re.search(
@@ -286,12 +348,58 @@ def _extract_with_spacy_ner(file_path: str, text: str) -> dict:
     }
 
 
+def _name_from_first_line(text: str) -> str:
+    """
+    Heuristic: most CVs place the candidate's full name on the very first
+    non-empty line — often in ALL CAPS or Title Case — with no email,
+    phone, or URL characters mixed in.
+
+    Handles two common layouts:
+      (a)  ``ALICE JOHNSON``          — clean first line (txt / docx)
+      (b)  ``ALICE JOHNSON Email: … | Phone: …``  — PDF single-line extraction
+
+    Returns the cleaned name string, or empty string if the first line
+    does not look like a plausible person name.
+    """
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+
+        # If the line contains contact indicators, try to extract the
+        # name portion that precedes them (common in PDF-extracted text
+        # where line breaks are lost).
+        if re.search(r'[@|/\\()\d{4,}]', line):
+            # Split at common separators that follow the name
+            prefix = re.split(
+                r'\s*(?:Email|Phone|Tel|Contact|LinkedIn|\||,|@)',
+                line, maxsplit=1, flags=re.IGNORECASE,
+            )[0].strip()
+            words = prefix.split()
+            if 2 <= len(words) <= 5 and all(
+                re.match(r"^[A-Za-z.\-\']+$", w) for w in words
+            ):
+                return prefix
+            return ""  # first line doesn't start with a name
+
+        words = line.split()
+        # A name is typically 2-5 words, each purely alphabetic (hyphens/periods OK)
+        if 2 <= len(words) <= 5 and all(
+            re.match(r"^[A-Za-z.\-\']+$", w) for w in words
+        ):
+            return line.strip()
+        return ""  # only inspect the very first non-empty line
+    return ""
+
+
 def _ner_person(text: str) -> str:
     """
     Return the first PERSON named entity from the resume header (spaCy NER).
 
     Scans only the first 500 characters where the candidate name typically
-    appears.  Returns empty string if spaCy is unavailable or no PERSON found.
+    appears.  Sanitises the result by stripping newlines and trailing noise
+    words (e.g. 'Email', 'Phone') that spaCy may accidentally include.
+    Returns empty string if spaCy is unavailable or no PERSON found.
     """
     nlp = _get_nlp()
     if nlp is None:
@@ -299,7 +407,13 @@ def _ner_person(text: str) -> str:
     doc = nlp(text[:500])
     for ent in doc.ents:
         if ent.label_ == "PERSON":
-            return ent.text.strip()
+            raw = ent.text.strip()
+            # Sanitise: remove embedded newlines and trailing noise
+            raw = raw.split("\n")[0].strip()
+            raw = re.sub(r'\s*(Email|Phone|Tel|Contact|Address|LinkedIn|Github).*$',
+                         '', raw, flags=re.IGNORECASE).strip()
+            if raw:
+                return raw
     return ""
 
 
@@ -358,10 +472,14 @@ def parse_resumes_from_directory(directory: str) -> list[dict]:
 
     for file_path in files:
         print(f"[resume_parser] Parsing: {file_path.name}")
+        # Step 1: Extract raw text from the file (PDF/DOCX/TXT)
         text = extract_text_from_file(str(file_path))
         if text.strip():
+            # Step 2: Extract structured data (name, email, skills, etc.)
             structured = extract_structured_data(str(file_path), text=text)
+            # Use the structured name if available, fall back to filename stem
             candidate_name = structured.get("name") or file_path.stem
+            # Step 3: Build the candidate dict for downstream scoring
             candidates.append({
                 "name": candidate_name,
                 "file": str(file_path),
@@ -369,6 +487,7 @@ def parse_resumes_from_directory(directory: str) -> list[dict]:
                 "structured": structured,
             })
         else:
+            # Empty file or extraction failure — skip this candidate
             print(f"[resume_parser] Warning: no text extracted from {file_path.name}")
 
     print(f"[resume_parser] Loaded {len(candidates)} resume(s) from '{directory}'.")
@@ -380,7 +499,8 @@ def parse_resumes_from_directory(directory: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def _parse_pdf(path: Path) -> str:
-    """Extract text from a PDF using pypdf."""
+    """Extract text from a PDF file using the pypdf library (PdfReader)."""
+    # Guard: ensure pypdf is installed
     if PdfReader is None:
         raise ImportError("pypdf is not installed. Run: pip install pypdf")
     try:
@@ -393,7 +513,8 @@ def _parse_pdf(path: Path) -> str:
 
 
 def _parse_docx(path: Path) -> str:
-    """Extract text from a DOCX file using python-docx."""
+    """Extract text from a Word (.docx) file using the python-docx library."""
+    # Guard: ensure python-docx is installed
     if DocxDocument is None:
         raise ImportError("python-docx is not installed. Run: pip install python-docx")
     try:
@@ -406,7 +527,7 @@ def _parse_docx(path: Path) -> str:
 
 
 def _parse_txt(path: Path) -> str:
-    """Read a plain-text file."""
+    """Read a plain-text (.txt or .md) file with UTF-8 encoding."""
     try:
         return path.read_text(encoding="utf-8", errors="replace")
     except Exception as exc:

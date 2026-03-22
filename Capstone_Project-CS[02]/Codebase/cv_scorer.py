@@ -96,11 +96,11 @@ def score_cv(candidate: dict, requirements: dict, model: str = SCORER_MODEL) -> 
     """
     Score a single candidate CV against the extracted job requirements.
 
-    uses LangChain to orchestrate the prompt → LLM → JSON parser chain.
+    Uses LangChain to orchestrate the prompt → LLM → JSON parser chain.
     The prompt template takes both the structured resume data (from
-    spaCy NER) and the parsed job description as input, and asks the LLM
-    to score the match for each requirement and generate an overall fit
-    score with an explanation.
+    pyresparser Tier 1 / spaCy NER Tier 2) and the parsed job description
+    as input, and asks the LLM to score the match for each requirement and
+    generate an overall fit score with an explanation.
 
     Parameters
     ----------
@@ -121,10 +121,13 @@ def score_cv(candidate: dict, requirements: dict, model: str = SCORER_MODEL) -> 
     candidate_name = candidate.get("name", "Unknown")
     print(f"[cv_scorer] Scoring: {candidate_name} (LangChain + {model})")
 
-    # Retrieve LangChain-wrapped Gemini LLM from shared client module
+    # Step 1: Retrieve a LangChain-wrapped Gemini LLM from the shared client
+    # module.  Temperature is set to 1.0 for nuanced, calibrated scoring.
     llm = llm_client.get_langchain_llm(model=model, temperature=1.0)
 
-    # Build LangChain chain: prompt → LLM → structured JSON parser
+    # Step 2: Build the LangChain chain.
+    # The chain flows:  prompt template -> Gemini LLM -> JSON output parser.
+    # This produces a structured dict of scores directly from the LLM response.
     prompt = ChatPromptTemplate.from_messages([
         ("system", _SYSTEM_INSTRUCTION),
         ("human", _USER_PROMPT),
@@ -132,10 +135,14 @@ def score_cv(candidate: dict, requirements: dict, model: str = SCORER_MODEL) -> 
     parser = JsonOutputParser()
     chain = prompt | llm | parser
 
-    # Prepare structured data from spaCy NER (if available)
+    # Step 3: Prepare the structured resume data (from pyresparser Tier 1 or
+    # spaCy NER Tier 2) as a JSON string for the prompt context.
     structured = candidate.get("structured", {})
     structured_str = json.dumps(structured, indent=2) if structured else "N/A"
 
+    # Step 4: Invoke the chain with all three inputs (JD, structured profile,
+    # raw CV text).  CV text is truncated to 6000 chars to stay within
+    # the LLM's context window.
     try:
         scores = chain.invoke({
             "requirements_json": json.dumps(requirements, indent=2),
@@ -144,10 +151,12 @@ def score_cv(candidate: dict, requirements: dict, model: str = SCORER_MODEL) -> 
         })
         print(f"[cv_scorer] LangChain chain completed for {candidate_name}.")
     except Exception as exc:
+        # LangChain chain failed (network, parsing, etc.) — fall back to
+        # calling the Gemini API directly without LangChain orchestration.
         print(f"[cv_scorer] LangChain failed for {candidate_name}, trying direct API: {exc}")
         scores = _fallback_direct_api(candidate, requirements, model)
 
-    # Return a new dict so original candidate is not mutated
+    # Return a NEW dict (spread operator) so the original candidate is not mutated
     return {**candidate, "scores": scores}
 
 
@@ -172,11 +181,14 @@ def score_all_cvs(candidates: list[dict], requirements: dict, model: str = SCORE
     list[dict]
         Each dict now includes a 'scores' key with numeric scores and narrative.
     """
-    scored: list[dict] = []
+    scored: list[dict] = []  # accumulate scored candidate dicts
     for candidate in candidates:
         try:
+            # Score each candidate individually; append the enriched dict
             scored.append(score_cv(candidate, requirements, model=model))
         except Exception as exc:
+            # On any failure, assign zero scores and log the error so the
+            # pipeline continues with remaining candidates.
             print(f"[cv_scorer] Error scoring {candidate.get('name', '?')}: {exc}")
             scored.append({
                 **candidate,
@@ -192,19 +204,39 @@ def score_all_cvs(candidates: list[dict], requirements: dict, model: str = SCORE
 def _fallback_direct_api(candidate: dict, requirements: dict, model: str) -> dict:
     """
     Fallback: call the Gemini API directly if the LangChain chain fails.
+
+    Bypasses LangChain entirely and sends the prompt directly to the
+    google-genai SDK client.  The response is parsed as JSON manually.
+
+    Parameters
+    ----------
+    candidate : dict
+        The candidate dict (must contain 'text' and optionally 'structured').
+    requirements : dict
+        Structured JD requirements.
+    model : str
+        Gemini model name.
+
+    Returns
+    -------
+    dict
+        Parsed scoring dict (same schema as the LangChain chain output).
     """
     from google.genai import types
 
+    # Use the default genai.Client (v1beta) for generate_content
     client = llm_client.get()
     structured = candidate.get("structured", {})
     structured_str = json.dumps(structured, indent=2) if structured else "N/A"
 
+    # Format the prompt template with actual values
     prompt = _USER_PROMPT.format(
         requirements_json=json.dumps(requirements, indent=2),
         structured_data=structured_str,
         cv_text=candidate["text"][:6000],
     )
 
+    # Call the Gemini API directly (no LangChain)
     response = client.models.generate_content(
         model=model,
         contents=prompt,
@@ -215,28 +247,56 @@ def _fallback_direct_api(candidate: dict, requirements: dict, model: str) -> dic
         ),
     )
 
+    # Parse the raw text response as JSON
     raw_output = response.text.strip()
     return _parse_json_response(raw_output, label=f"scores for {candidate.get('name', '?')}")
 
 
 def _parse_json_response(raw: str, label: str = "response") -> dict:
-    """Parse JSON from an LLM response, stripping markdown fences if present."""
+    """
+    Parse JSON from an LLM response, stripping markdown fences if present.
+
+    LLMs often wrap JSON in ```json ... ``` code fences.  This function
+    strips those fences, then attempts json.loads().  If that fails, it
+    tries to extract the first {...} block as a last resort.
+
+    Parameters
+    ----------
+    raw : str
+        Raw LLM response text.
+    label : str
+        Human-readable label for error messages.
+
+    Returns
+    -------
+    dict
+        Parsed JSON dict, or a zeroed-out score dict on failure.
+    """
+    # Strip markdown code fences (```json ... ```) if present
     cleaned = re.sub(r"```(?:json)?\s*", "", raw).strip().rstrip("`").strip()
     try:
         return json.loads(cleaned)
     except json.JSONDecodeError:
+        # Fallback: try to extract the first JSON object {...} from the text
         match = re.search(r"\{.*\}", cleaned, re.DOTALL)
         if match:
             try:
                 return json.loads(match.group())
             except json.JSONDecodeError:
                 pass
+        # All parsing attempts failed — return zeroed scores
         print(f"[cv_scorer] Warning: could not parse {label}, using zero scores.")
         return _zero_scores(error=f"JSON parse failed: {raw[:200]}")
 
 
 def _zero_scores(error: str = "") -> dict:
-    """Return a zeroed-out score dict used when parsing or API calls fail."""
+    """
+    Return a zeroed-out score dict used when scoring fails.
+
+    Ensures downstream code (ranker, report_generator) always receives
+    a consistent dict shape regardless of whether the LLM call succeeded.
+    The error message is stored in the 'gaps' list for visibility.
+    """
     return {
         "overall_score": 0,
         "must_have_score": 0,

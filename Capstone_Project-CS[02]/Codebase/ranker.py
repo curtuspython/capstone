@@ -4,7 +4,7 @@ ranker.py
 Aggregates individual dimension scores into a final composite score and
 produces a sorted, ranked list of candidates.
 
-Semantic scoring strategy (three-tier fallback -- first that succeeds wins):
+Semantic scoring strategy (four-tier fallback -- first that succeeds wins):
   Tier 1 -- LlamaIndex GeminiEmbedding (llama-index-embeddings-gemini).
             LlamaIndex is the declared semantic matching framework (project
             requirement). get_llama_embed() from llm_client is called first.
@@ -18,7 +18,7 @@ Semantic scoring strategy (three-tier fallback -- first that succeeds wins):
   Tier 3 -- TF-IDF cosine similarity via scikit-learn (fully local, no API).
             Always produces real, differentiated scores without any network
             call or API key.
-  Tier 4 -- Neutral default 50.0 (only if all three tiers above fail).
+  Tier 4 -- Neutral default 50.0 (only if all three scoring tiers above fail).
 
 Weighting rationale (must sum to 1.0):
   - must_have      : 35%  -- mandatory requirements are the hardest filter
@@ -284,10 +284,29 @@ def _try_tfidf_cosine(candidates: list[dict], jd_text: str) -> bool:
 
 
 def _cosine_similarity(a: list[float], b: list[float]) -> float:
-    """Compute cosine similarity between two vectors without numpy."""
+    """
+    Compute cosine similarity between two vectors without numpy.
+
+    Uses pure Python to avoid adding numpy as a dependency.  The formula
+    is: cos(a, b) = dot(a, b) / (||a|| * ||b||).  Returns 0.0 if either
+    vector has zero magnitude (edge case for empty documents).
+
+    Parameters
+    ----------
+    a, b : list[float]
+        Input vectors (must be the same length).
+
+    Returns
+    -------
+    float
+        Cosine similarity in the range [-1.0, 1.0].
+    """
+    # Dot product of the two vectors
     dot = sum(x * y for x, y in zip(a, b))
+    # L2 norms (Euclidean lengths)
     norm_a = math.sqrt(sum(x * x for x in a))
     norm_b = math.sqrt(sum(x * x for x in b))
+    # Guard against division by zero (empty or all-zero vectors)
     if norm_a == 0 or norm_b == 0:
         return 0.0
     return dot / (norm_a * norm_b)
@@ -315,14 +334,18 @@ def compute_composite_score(scores: dict, semantic_score: float = 50.0) -> float
     """
     total = 0.0
     for key, weight in WEIGHTS.items():
+        # Semantic score comes from a separate field (not inside 'scores' dict)
         if key == "semantic_score":
             raw = semantic_score
         else:
+            # All other dimensions come from the LLM #2 scoring dict
             raw = scores.get(key, 0)
+        # Safely convert to float (LLM may return strings or None)
         try:
             value = float(raw)
         except (TypeError, ValueError):
             value = 0.0
+        # Accumulate the weighted contribution of this dimension
         total += value * weight
     return round(total, 2)
 
@@ -354,16 +377,21 @@ def rank_candidates(
         Sorted list; each dict gains keys:
           ``composite_score``, ``semantic_score``, ``rank``, ``qualified``.
     """
-    # Compute LlamaIndex semantic similarity scores if JD text is available
+    # Step 1: Compute semantic similarity scores (4-tier fallback) if JD text
+    # is available.  This adds a 'semantic_score' key to each candidate dict.
     if jd_text:
         scored_candidates = compute_semantic_scores(scored_candidates, jd_text)
 
-    enriched: list[dict] = []
+    enriched: list[dict] = []  # will hold candidates with composite scores
 
+    # Step 2: Compute composite scores for each candidate by blending all
+    # five dimension scores according to the configured weights.
     for candidate in scored_candidates:
         scores = candidate.get("scores", {})
+        # Use 50.0 (neutral) if semantic scoring was skipped or unavailable
         semantic = candidate.get("semantic_score", 50.0)
         composite = compute_composite_score(scores, semantic)
+        # Determine qualification status against the threshold (if any)
         qualified = True if min_score is None else composite >= min_score
         enriched.append({
             **candidate,
@@ -372,10 +400,11 @@ def rank_candidates(
             "qualified": qualified,
         })
 
-    # Sort: qualified first (desc score), then disqualified (desc score)
+    # Step 3: Sort candidates.  Qualified candidates come first (sorted by
+    # composite score descending), followed by disqualified candidates.
     enriched.sort(key=lambda c: (c["qualified"], c["composite_score"]), reverse=True)
 
-    # Assign 1-based ranks
+    # Step 4: Assign 1-based rank positions after sorting
     for idx, candidate in enumerate(enriched):
         candidate["rank"] = idx + 1
 
@@ -401,8 +430,9 @@ def get_ranking_summary(ranked_candidates: list[dict]) -> str:
     str
         A formatted summary string.
     """
-    # Only show the Qualified column if it is actually informative
-    # (i.e. at least one candidate was flagged as not qualified)
+    # Only show the Qualified column if at least one candidate was flagged
+    # as not qualified (i.e. below the --min-score threshold).  When every
+    # candidate passes, the column is hidden to keep the output clean.
     show_qualified = any(not c.get("qualified", True) for c in ranked_candidates)
 
     if show_qualified:

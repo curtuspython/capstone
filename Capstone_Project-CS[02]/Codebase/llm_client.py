@@ -23,12 +23,16 @@ Pattern:
 from google import genai
 from langchain_google_genai import ChatGoogleGenerativeAI
 
-# Module-level state; populated by init()
-_client: genai.Client | None = None        # default SDK client (v1beta)
+# ---------------------------------------------------------------------------
+# Module-level state  (populated by init(), consumed by getters below).
+# Using module globals instead of a class keeps the API surface minimal:
+# other modules just call llm_client.get() or llm_client.get_langchain_llm().
+# ---------------------------------------------------------------------------
+_client: genai.Client | None = None        # default SDK client (v1beta endpoint)
 _embed_client: genai.Client | None = None  # v1 client dedicated to embed_content
-_api_key: str | None = None
-_langchain_llms: dict = {}
-_llama_embed = None
+_api_key: str | None = None                # stored API key for LangChain / LlamaIndex
+_langchain_llms: dict = {}                 # cache of LangChain LLM instances keyed by config
+_llama_embed = None                        # cached LlamaIndex GeminiEmbedding instance
 
 
 def init(api_key: str) -> None:
@@ -148,8 +152,11 @@ def get_langchain_llm(
     # not at app startup before requirements are installed.
     from langchain_google_genai import ChatGoogleGenerativeAI  # noqa: PLC0415
 
+    # Cache key combines model name + temperature so different configs
+    # each get their own LLM instance (e.g. flash@0.1 vs pro@1.0).
     cache_key = f"{model}_{temperature}"
     if cache_key not in _langchain_llms:
+        # First request for this config -- instantiate and cache
         _langchain_llms[cache_key] = ChatGoogleGenerativeAI(
             model=model,
             google_api_key=get_api_key(),
@@ -177,11 +184,15 @@ def get_llama_embed():
     global _llama_embed
     if _llama_embed is None:
         try:
+            # Lazy import: only load LlamaIndex when actually needed
             from llama_index.embeddings.gemini import GeminiEmbedding  # noqa: PLC0415
+            # Initialise with the text-embedding-004 model and stored API key
             _llama_embed = GeminiEmbedding(
                 model_name="models/text-embedding-004",
                 api_key=get_api_key(),
             )
         except Exception as exc:
+            # LlamaIndex not installed or API key issue -- return None so
+            # callers can fall through to Tier 2 (Gemini SDK) or Tier 3 (TF-IDF)
             print(f"[llm_client] LlamaIndex embed init skipped: {exc}")
     return _llama_embed

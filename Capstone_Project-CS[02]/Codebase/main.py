@@ -39,7 +39,14 @@ import argparse
 import json
 import os
 import sys
+import warnings
 from pathlib import Path
+
+# Suppress noisy third-party warnings that clutter terminal output
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.filterwarnings("ignore", message="urllib3.*doesn't match a supported version")
+warnings.filterwarnings("ignore", message=".*charset_normalizer.*")
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 import llm_client
 
@@ -290,7 +297,7 @@ _INTERACTIVE_HELP = """
     edit-must          Edit must-have requirements (comma-separated)
     edit-nice          Edit nice-to-have requirements (comma-separated)
     edit-keywords      Edit keywords (comma-separated)
-    rescore            Re-score filtered candidates with current requirements
+    rescore            Re-score ALL candidates with current requirements (expensive)
     rerank             Re-rank (no re-scoring) with current settings
     export             Save the current ranking to a TXT file on disk
     help               Show this help message
@@ -358,9 +365,12 @@ def _interactive_loop(
 
     edit-keywords   -- Same as edit-must but for the keyword list.
 
-    rescore         -- Re-run LLM #2 (cv_scorer) on all scored candidates
-                       using the current requirements (after any edits).
-                       Expensive: makes one LLM API call per candidate.
+    rescore         -- Re-run LLM #2 (cv_scorer) on ALL scored candidates
+                       (not just any active filter) using the current
+                       requirements (after any edits via edit-must / edit-nice
+                       / edit-keywords).  Expensive: one LLM API call per
+                       candidate.  Run 'rerank' instead for a fast no-LLM
+                       resort with the current filter and min-score.
 
     rerank          -- Re-run the ranker with current settings (min-score,
                        filter) without calling the LLM again.  Fast.
@@ -383,20 +393,24 @@ def _interactive_loop(
     current_ranked = list(ranked_candidates)   # current ranked/filtered view
     current_reqs   = dict(requirements)        # live requirements (editable)
     min_score      = None                      # composite score floor (float|None)
+    active_filter  = None                      # current skill filter string or None
 
 
+    # Main command loop — reads user input and dispatches to handlers
     while True:
         try:
             cmd = input("\n[interactive] > ").strip()
         except (EOFError, KeyboardInterrupt):
+            # Handle Ctrl+D / Ctrl+C gracefully
             print("\n[interactive] Exiting.")
             break
 
         if not cmd:
-            continue
+            continue  # ignore empty input
 
+        # Split command into action verb + optional argument
         parts = cmd.split(maxsplit=1)
-        action = parts[0].lower()
+        action = parts[0].lower()   # normalise to lowercase for matching
         arg = parts[1].strip() if len(parts) > 1 else ""
 
         # ---- help ----
@@ -412,18 +426,21 @@ def _interactive_loop(
         elif action == "show":
             _cmd_show(current_ranked, arg)
 
-        # ---- filter <skill> ----
+        # ---- filter <skill> : narrow ranking to candidates matching a keyword ----
         elif action == "filter":
             if not arg:
                 print("[interactive] Usage: filter <skill>")
                 continue
+            # Store the active filter for use in subsequent rerank/rescore
             active_filter = arg.lower()
+            # Search both raw CV text and structured data for the keyword
             filtered = [
                 c for c in current_scored
                 if active_filter in c.get("text", "").lower()
                 or active_filter in json.dumps(c.get("structured", {})).lower()
             ]
             print(f"[interactive] Filtered to {len(filtered)} candidate(s) matching '{arg}'.")
+            # Re-rank the filtered subset
             current_ranked = rank_candidates(filtered, min_score=min_score, jd_text=jd_text)
             print(get_ranking_summary(current_ranked))
 
@@ -434,27 +451,32 @@ def _interactive_loop(
             print("[interactive] Filters cleared. Full ranking restored.")
             print(get_ranking_summary(current_ranked))
 
-        # ---- min-score <N> ----
+        # ---- min-score <N> : set minimum composite score threshold ----
         elif action == "min-score":
             try:
                 val = float(arg)
+                # Setting to 0 or below effectively disables the threshold
                 min_score = val if val > 0 else None
+                # Respect any active skill filter when rebuilding the ranked view
                 source = current_scored if not active_filter else [
                     c for c in current_scored
                     if active_filter in c.get("text", "").lower()
                 ]
+                # Re-rank immediately (no API calls, just re-sort + threshold)
                 current_ranked = rank_candidates(source, min_score=min_score, jd_text=jd_text)
                 print(f"[interactive] Min-score set to {min_score}. Re-ranked.")
                 print(get_ranking_summary(current_ranked))
             except ValueError:
                 print("[interactive] Usage: min-score <number 0-100>")
 
-        # ---- edit-must ----
+        # ---- edit-must : replace must-have requirements inline ----
         elif action == "edit-must":
             if not arg:
+                # No argument — show current values as a reminder
                 print(f"[interactive] Current must-have: {current_reqs.get('must_have', [])}")
                 print("[interactive] Usage: edit-must skill1, skill2, skill3")
                 continue
+            # Parse comma-separated skills and update the live requirements dict
             current_reqs["must_have"] = [s.strip() for s in arg.split(",") if s.strip()]
             print(f"[interactive] Must-have updated to: {current_reqs['must_have']}")
             print("[interactive] Run 'rescore' to re-score with updated requirements.")
@@ -479,10 +501,12 @@ def _interactive_loop(
             print(f"[interactive] Keywords updated to: {current_reqs['keywords']}")
             print("[interactive] Run 'rescore' to re-score with updated requirements.")
 
-        # ---- rescore : re-score with updated requirements ----
+        # ---- rescore : re-run LLM #2 on all candidates (expensive) ----
         elif action == "rescore":
             print("[interactive] Re-scoring all candidates with updated requirements ...")
+            # Call LLM #2 once per candidate — this is the most expensive operation
             current_scored = score_all_cvs(current_scored, current_reqs, model=llm2)
+            # Rebuild the ranked view, respecting any active filter
             source = current_scored if not active_filter else [
                 c for c in current_scored
                 if active_filter in c.get("text", "").lower()
@@ -490,8 +514,9 @@ def _interactive_loop(
             current_ranked = rank_candidates(source, min_score=min_score, jd_text=jd_text)
             print(get_ranking_summary(current_ranked))
 
-        # ---- rerank : re-rank without re-scoring ----
+        # ---- rerank : rebuild ranking without calling the LLM (fast) ----
         elif action == "rerank":
+            # No LLM calls — just re-sort and re-apply threshold/filter
             source = current_scored if not active_filter else [
                 c for c in current_scored
                 if active_filter in c.get("text", "").lower()
@@ -522,16 +547,26 @@ def _cmd_show(ranked: list[dict], arg: str) -> None:
     """
     Display detailed match explanation and evidence for a candidate by rank.
 
-    Prints dimension-level scores, strengths (supporting evidence), gaps
-    (areas of concern), recruiter recommendation, and structured profile
-    data extracted by spaCy NER — all in the terminal.
+    Prints all five dimension scores (must-have, nice-to-have, experience,
+    keyword, semantic), the LLM-generated strengths and gaps lists, the
+    recruiter recommendation note, and the structured profile fields
+    extracted by pyresparser (Tier 1) or spaCy NER (Tier 2).
+
+    Parameters
+    ----------
+    ranked : list[dict]
+        The current ranked candidate list.
+    arg : str
+        The rank number as a string (parsed to int).
     """
+    # Parse the rank number from the user's input
     try:
         rank_num = int(arg)
     except (ValueError, TypeError):
         print("[interactive] Usage: show <rank_number>")
         return
 
+    # Find the candidate matching the requested rank
     candidate = None
     for c in ranked:
         if c.get("rank") == rank_num:
@@ -542,33 +577,45 @@ def _cmd_show(ranked: list[dict], arg: str) -> None:
         print(f"[interactive] No candidate at rank #{rank_num}.")
         return
 
+    # Extract the scores and structured profile for display
     scores = candidate.get("scores", {})
     structured = candidate.get("structured", {})
     sep = "-" * 60
 
+    # --- Header: rank and candidate name ---
     print(f"\n{sep}")
     print(f"  RANK #{candidate['rank']}  —  {candidate['name']}")
     print(sep)
+
+    # --- Composite, semantic, and overall scores ---
     print(f"  File           : {candidate.get('file', 'N/A')}")
     print(f"  Composite Score: {candidate.get('composite_score', 'N/A')} / 100")
     print(f"  Semantic Score : {candidate.get('semantic_score', 'N/A')} / 100  (LlamaIndex -> Gemini -> TF-IDF)")
     print(f"  Overall (LLM)  : {scores.get('overall_score', 'N/A')} / 100")
     print()
+
+    # --- Individual dimension scores from LLM #2 ---
     print(f"  Must-Have      : {scores.get('must_have_score', 'N/A')}")
     print(f"  Nice-to-Have   : {scores.get('nice_to_have_score', 'N/A')}")
     print(f"  Experience     : {scores.get('experience_score', 'N/A')}")
     print(f"  Keywords       : {scores.get('keyword_score', 'N/A')}")
     print()
+
+    # --- Strengths: LLM-identified supporting evidence ---
     print("  Strengths (supporting evidence):")
     for s in scores.get("strengths", []):
         print(f"    + {s}")
+
+    # --- Gaps: LLM-identified areas of concern ---
     print("  Gaps (areas of concern):")
     for g in scores.get("gaps", []):
         print(f"    - {g}")
     print()
+
+    # --- Recruiter recommendation note from LLM #2 ---
     print(f"  Recruiter Note: {scores.get('recommendation', 'N/A')}")
 
-    # Show structured data extracted by pyresparser (Tier 1) / spaCy NER (Tier 2)
+    # --- Structured profile data (from pyresparser Tier 1 or spaCy NER Tier 2) ---
     if structured and any(structured.get(k) for k in ["skills", "education", "degree"]):
         print()
         print("  Structured Profile (pyresparser Tier 1 / spaCy NER Tier 2):")
