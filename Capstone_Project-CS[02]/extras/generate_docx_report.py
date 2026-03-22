@@ -161,9 +161,10 @@ def build_docx() -> None:
         "strategy: pyresparser (project requirement) is attempted first; spaCy "
         "3.x NER + regex serves as the automatic fallback for Python 3.11+ "
         "compatibility. Semantic similarity scoring uses a four-tier fallback: "
-        "Gemini text-embedding-004 -> TF-IDF cosine similarity (scikit-learn) -> "
-        "neutral default, ensuring real differentiated scores are always produced. "
-        "Results are exported as TXT/CSV reports with a fully interactive terminal mode."
+        "LlamaIndex GeminiEmbedding -> Gemini SDK text-embedding-004 -> TF-IDF "
+        "cosine similarity (scikit-learn) -> neutral default 50.0, ensuring real "
+        "differentiated scores are always produced. Results are printed to the "
+        "terminal; an optional TXT export is available via the interactive mode."
     )
 
     # ====================================================================
@@ -203,9 +204,11 @@ def build_docx() -> None:
         "Parse candidate resumes from PDF, DOCX, and plain-text formats.",
         "Extract structured hiring criteria (must-have, nice-to-have, keywords, "
         "minimum experience) from the job description using LLM #1.",
-        "Score each candidate CV across four measurable dimensions using LLM #2.",
+        "Score each candidate CV across five dimensions using LLM #2 (must-have, "
+        "nice-to-have, experience, keywords) plus semantic similarity via LlamaIndex.",
         "Compute a weighted composite score and produce a sorted ranked list.",
-        "Generate a detailed, human-readable text report and a CSV export.",
+        "Print a detailed, human-readable ranked report to the terminal; export "
+        "to TXT on demand via the interactive mode 'export' command.",
         "Keep the API key out of the codebase; accept via CLI or environment variable.",
         "Maintain a fully modular codebase with one clear responsibility per module.",
     ]
@@ -230,7 +233,7 @@ def build_docx() -> None:
         ("spaCy 3.x NER + regex (Tier 2)", "Fallback extractor -- Python 3.11+ safe"),
         ("scikit-learn",                    "TF-IDF cosine similarity -- semantic scoring fallback"),
         ("pypdf / python-docx",             "Raw text extraction from PDF and DOCX files"),
-        ("fpdf2",                           "PDF project report generation"),
+        ("python-docx",                     "DOCX project report generation"),
     ])
 
     # 4.2 Architecture
@@ -242,7 +245,7 @@ def build_docx() -> None:
         ("jd_analyzer.py",       "LangChain chain: LLM #1 structured JD extraction"),
         ("cv_scorer.py",         "LangChain chain: LLM #2 multi-dimension CV scoring"),
         ("ranker.py",            "Semantic scoring (Gemini->TF-IDF) + composite ranking"),
-        ("report_generator.py",  "Writes TXT and CSV reports to disk"),
+        ("report_generator.py",  "Builds ranked report; TXT export via interactive mode"),
     ])
 
     # 4.3 Pipeline
@@ -268,11 +271,12 @@ def build_docx() -> None:
     )
     _add_body(doc,
         "Step 4 -- Semantic Matching (LlamaIndex framework, four-tier fallback): "
-        "Tier 1 uses Gemini text-embedding-004 via google-genai SDK to embed the "
-        "JD and each CV, computing cosine similarity as semantic_score (0-100). "
-        "If Gemini embeddings fail (API version mismatch / quota), Tier 2 uses "
-        "TF-IDF vectorisation + cosine similarity (scikit-learn) so scores are "
-        "always real and differentiated, never a neutral placeholder."
+        "Tier 1 uses LlamaIndex GeminiEmbedding (cosine similarity). If the "
+        "llama-index-embeddings-gemini package targets a deprecated endpoint, "
+        "Tier 2 uses the Gemini SDK text-embedding-004 directly via an isolated "
+        "v1 client. Tier 3 falls back to TF-IDF cosine similarity (scikit-learn, "
+        "batch-normalised to [10, 100]). Tier 4 applies a neutral default of 50.0 "
+        "only if all embedding tiers fail. Real, differentiated scores are always produced."
     )
 
     # 4.4 Scoring
@@ -307,7 +311,8 @@ def build_docx() -> None:
         "in 4 out of 5 cases on the test set.",
         "Pipeline completes for 5 CVs in under 30 seconds using Gemini's free "
         "tier, demonstrating practical usability.",
-        "CSV export enables downstream analysis in Excel or Google Sheets.",
+        "Interactive mode allows live query refinement (filter, edit requirements, "
+        "rescore) without restarting the pipeline; TXT export saves the final ranking.",
     ]
     for r in results:
         _add_bullet(doc, r)
@@ -327,7 +332,8 @@ def build_docx() -> None:
         "Possible extensions include: (1) adding an embedding-based similarity "
         "step for tie-breaking; (2) integrating a web-based recruiter dashboard; "
         "(3) supporting multilingual CVs via translation pre-processing; and "
-        "(4) fine-tuning the composite weights based on historical hiring outcomes."
+        "(4) fine-tuning the composite weights based on historical hiring outcomes; "
+        "and (5) adding CSV/spreadsheet export for downstream HR analytics."
     )
 
     # ====================================================================
