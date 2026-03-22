@@ -119,7 +119,7 @@ def _write_txt_report(
         sep,
         "CANDIDATE RANKING SUMMARY",
         thin,
-        f"{'#':<4}{'Candidate':<26}{'Composite':>10}  {'MustHave':>9}  "
+        f"{'#':<4}{'Candidate':<26}{'Composite':>10}  {'Semantic':>9}  {'MustHave':>9}  "
         f"{'NiceToHave':>11}  {'Exp':>5}  {'Keyword':>8}  {'Overall':>8}",
         thin,
     ]
@@ -128,6 +128,7 @@ def _write_txt_report(
         lines.append(
             f"{c['rank']:<4}{c['name'][:25]:<26}"
             f"{c['composite_score']:>10.1f}  "
+            f"{str(c.get('semantic_score', 'N/A')):>9}  "
             f"{_safe_int(s, 'must_have_score'):>9}  "
             f"{_safe_int(s, 'nice_to_have_score'):>11}  "
             f"{_safe_int(s, 'experience_score'):>5}  "
@@ -145,6 +146,7 @@ def _write_txt_report(
             f"Rank #{c['rank']}  —  {c['name']}",
             f"File         : {c.get('file', 'N/A')}",
             f"Composite    : {c['composite_score']:.1f} / 100",
+            f"Semantic     : {c.get('semantic_score', 'N/A')} / 100  (LlamaIndex embedding similarity)",
             f"Overall (LLM): {s.get('overall_score', 'N/A')} / 100",
             "",
             "Strengths:",
@@ -165,19 +167,25 @@ def _write_txt_report(
         sep,
         "SCORING METHODOLOGY",
         thin,
-        "This report uses two Large Language Models via the Google Gemini API:",
+        "This report uses two Large Language Models via the Google Gemini API,",
+        "orchestrated by LangChain with LlamaIndex for semantic matching:",
         f"  LLM #1 ({llm1}) — Analyses the job description and",
         "           extracts structured requirements (must-have, nice-to-have,",
-        "           keywords, minimum experience). Runs once per session.",
+        "           keywords, minimum experience). Uses LangChain chain.",
         f"  LLM #2 ({llm2}) — Evaluates each CV against those requirements",
         "           and produces dimension-level scores plus narrative feedback.",
-        "           Runs once per candidate in a loop.",
+        "           Uses LangChain chain. Runs once per candidate.",
+        "  LlamaIndex  — Computes semantic similarity between each CV and the",
+        "           JD using Gemini text-embedding-004 embeddings.",
+        "  pyresparser — Extracts structured fields (skills, education, etc.)",
+        "           from candidate resumes for richer LLM context.",
         "",
         "Composite score weights:",
-        "  Must-Have      : 40%",
-        "  Experience     : 25%",
-        "  Nice-to-Have   : 20%",
-        "  Keyword Match  : 15%",
+        "  Must-Have      : 35%",
+        "  Semantic Match : 20%  (LlamaIndex)",
+        "  Experience     : 20%",
+        "  Nice-to-Have   : 15%",
+        "  Keyword Match  : 10%",
         sep,
     ]
 
@@ -187,7 +195,7 @@ def _write_txt_report(
 def _write_csv_report(path: str, ranked_candidates: list[dict]) -> None:
     """Write a flat CSV report for spreadsheet consumption."""
     fieldnames = [
-        "rank", "name", "composite_score",
+        "rank", "name", "composite_score", "semantic_score",
         "overall_score", "must_have_score", "nice_to_have_score",
         "experience_score", "keyword_score",
         "strengths", "gaps", "recommendation", "file",
@@ -202,6 +210,7 @@ def _write_csv_report(path: str, ranked_candidates: list[dict]) -> None:
                 "rank":               c["rank"],
                 "name":               c["name"],
                 "composite_score":    c["composite_score"],
+                "semantic_score":     c.get("semantic_score", 0),
                 "overall_score":      s.get("overall_score", 0),
                 "must_have_score":    s.get("must_have_score", 0),
                 "nice_to_have_score": s.get("nice_to_have_score", 0),

@@ -1,8 +1,15 @@
 """
 cv_scorer.py
 ------------
-Uses LLM #2 (Google Gemini: gemini-2.5-pro) to score a single candidate
+Uses **LangChain** with Google Gemini (LLM #2) to score a single candidate
 CV against the structured job requirements extracted by jd_analyzer.py (LLM #1).
+
+LangChain serves as the orchestrator for:
+  - Prompt templating (ChatPromptTemplate) — takes structured resume data
+    (from pyresparser) and parsed job description as input.
+  - LLM invocation (ChatGoogleGenerativeAI via langchain-google-genai)
+  - Structured JSON output parsing (JsonOutputParser) — scores per requirement
+    plus an overall fit score with explanation.
 
 For each CV the LLM returns:
   - overall_score      : int  0-100
@@ -24,7 +31,8 @@ produce calibrated scores that directly determine the final hiring ranking.
 import json
 import re
 
-from google.genai import types
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import JsonOutputParser
 
 import llm_client
 
@@ -37,7 +45,6 @@ import llm_client
 # read a full CV, infer skills from described experience, compare against job
 # requirements, and produce calibrated numeric scores that determine the final
 # ranking. Accuracy here matters most -- wrong scores = wrong hiring decision.
-# Pro's thinking mode is allowed to run freely for nuanced judgment.
 SCORER_MODEL = "gemini-2.5-pro"
 
 _SYSTEM_INSTRUCTION = (
@@ -46,13 +53,16 @@ _SYSTEM_INSTRUCTION = (
     "provide objective, numeric scores with brief justifications."
 )
 
-_USER_PROMPT_TEMPLATE = """
+_USER_PROMPT = """
 Score the following candidate resume against the job requirements.
 
 Job Requirements (JSON):
 {requirements_json}
 
-Candidate CV:
+Candidate Structured Profile (extracted via pyresparser):
+{structured_data}
+
+Candidate CV (Full Text):
 ---
 {cv_text}
 ---
@@ -86,12 +96,16 @@ def score_cv(candidate: dict, requirements: dict, model: str = SCORER_MODEL) -> 
     """
     Score a single candidate CV against the extracted job requirements.
 
-    Uses the shared Gemini client initialised by llm_client.init() in main.py.
+    Uses LangChain to orchestrate the prompt → LLM → JSON parser chain.
+    The prompt template takes both the structured resume data (from
+    pyresparser) and the parsed job description as input, and asks the LLM
+    to score the match for each requirement and generate an overall fit
+    score with an explanation.
 
     Parameters
     ----------
     candidate : dict
-        Must contain keys 'name', 'file', and 'text' (raw CV text).
+        Must contain keys 'name', 'file', 'text', and optionally 'structured'.
     requirements : dict
         Structured JD requirements from jd_analyzer.analyze_job_description().
     model : str
@@ -105,37 +119,33 @@ def score_cv(candidate: dict, requirements: dict, model: str = SCORER_MODEL) -> 
         the full scoring breakdown from the LLM.
     """
     candidate_name = candidate.get("name", "Unknown")
-    print(f"[cv_scorer] Scoring: {candidate_name} (model: {model})")
+    print(f"[cv_scorer] Scoring: {candidate_name} (LangChain + {model})")
 
-    client = llm_client.get()  # retrieve shared client from llm_client module
+    # Retrieve LangChain-wrapped Gemini LLM from shared client module
+    llm = llm_client.get_langchain_llm(model=model, temperature=1.0)
 
-    # Truncate CV text to avoid exceeding context length
-    cv_text_trunc = candidate["text"][:6000]
-    requirements_json = json.dumps(requirements, indent=2)
+    # Build LangChain chain: prompt → LLM → structured JSON parser
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", _SYSTEM_INSTRUCTION),
+        ("human", _USER_PROMPT),
+    ])
+    parser = JsonOutputParser()
+    chain = prompt | llm | parser
 
-    prompt = _USER_PROMPT_TEMPLATE.format(
-        requirements_json=requirements_json,
-        cv_text=cv_text_trunc,
-    )
+    # Prepare structured data from pyresparser (if available)
+    structured = candidate.get("structured", {})
+    structured_str = json.dumps(structured, indent=2) if structured else "N/A"
 
-    # Call the new google-genai SDK: system_instruction lives in GenerateContentConfig.
-    # No thinking_config: gemini-2.5-pro requires thinking mode (budget=0 is rejected).
-    # Letting Pro think freely is desirable here -- this is the high-stakes judgment
-    # step where reasoning depth directly improves scoring accuracy.
-    # temperature=1.0 is required when thinking mode is active on Pro.
-    # max_output_tokens set high to accommodate thinking tokens + JSON output.
-    response = client.models.generate_content(
-        model=model,
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            system_instruction=_SYSTEM_INSTRUCTION,
-            temperature=1.0,
-            max_output_tokens=16000,
-        ),
-    )
-
-    raw_output = response.text.strip()
-    scores = _parse_json_response(raw_output, label=f"scores for {candidate_name}")
+    try:
+        scores = chain.invoke({
+            "requirements_json": json.dumps(requirements, indent=2),
+            "structured_data": structured_str,
+            "cv_text": candidate["text"][:6000],
+        })
+        print(f"[cv_scorer] LangChain chain completed for {candidate_name}.")
+    except Exception as exc:
+        print(f"[cv_scorer] LangChain failed for {candidate_name}, trying direct API: {exc}")
+        scores = _fallback_direct_api(candidate, requirements, model)
 
     # Return a new dict so original candidate is not mutated
     return {**candidate, "scores": scores}
@@ -144,6 +154,9 @@ def score_cv(candidate: dict, requirements: dict, model: str = SCORER_MODEL) -> 
 def score_all_cvs(candidates: list[dict], requirements: dict, model: str = SCORER_MODEL) -> list[dict]:
     """
     Score every candidate in the list and return the enriched list.
+
+    Results are collected into a list with detailed per-candidate feedback
+    including scores, strengths, gaps, and recommendations.
 
     Parameters
     ----------
@@ -175,6 +188,36 @@ def score_all_cvs(candidates: list[dict], requirements: dict, model: str = SCORE
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
+
+def _fallback_direct_api(candidate: dict, requirements: dict, model: str) -> dict:
+    """
+    Fallback: call the Gemini API directly if the LangChain chain fails.
+    """
+    from google.genai import types
+
+    client = llm_client.get()
+    structured = candidate.get("structured", {})
+    structured_str = json.dumps(structured, indent=2) if structured else "N/A"
+
+    prompt = _USER_PROMPT.format(
+        requirements_json=json.dumps(requirements, indent=2),
+        structured_data=structured_str,
+        cv_text=candidate["text"][:6000],
+    )
+
+    response = client.models.generate_content(
+        model=model,
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            system_instruction=_SYSTEM_INSTRUCTION,
+            temperature=1.0,
+            max_output_tokens=16000,
+        ),
+    )
+
+    raw_output = response.text.strip()
+    return _parse_json_response(raw_output, label=f"scores for {candidate.get('name', '?')}")
+
 
 def _parse_json_response(raw: str, label: str = "response") -> dict:
     """Parse JSON from an LLM response, stripping markdown fences if present."""

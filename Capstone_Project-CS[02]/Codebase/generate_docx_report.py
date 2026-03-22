@@ -120,6 +120,7 @@ def _add_kv_table(doc: Document, rows: list[tuple[str, str]]) -> None:
 # ---------------------------------------------------------------------------
 
 def build_docx() -> None:
+    """Build the full DOCX project report and save to Report/Report.docx."""
     doc = Document()
 
     # ---- Page margins ----

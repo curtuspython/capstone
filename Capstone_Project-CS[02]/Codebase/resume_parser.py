@@ -2,12 +2,18 @@
 resume_parser.py
 ----------------
 Parses candidate resumes from PDF, DOCX, or plain-text files and returns
-a structured dictionary containing the candidate's name and raw text.
+structured candidate dictionaries containing both raw text and structured
+data extracted via pyresparser.
 
-Supported formats:
-  - PDF   (.pdf)  via pypdf
-  - Word  (.docx) via python-docx
-  - Text  (.txt)  via built-in open()
+Parsing stack:
+  - pyresparser   : structured information extraction (name, email, skills,
+                     education, experience) as required by the project spec.
+  - pypdf          : PDF text extraction
+  - python-docx    : Word (.docx) text extraction
+  - Built-in open(): plain-text (.txt / .md) reading
+
+If pyresparser is not installed or fails for a particular file, the module
+falls back gracefully to filename-based naming and empty structured fields.
 """
 
 import os
@@ -22,6 +28,23 @@ try:
     from docx import Document as DocxDocument
 except ImportError:  # pragma: no cover
     DocxDocument = None  # type: ignore
+
+# pyresparser — structured resume information extraction (project requirement)
+# Ensure NLTK data is available before importing pyresparser (it needs stopwords
+# at module-load time and raises LookupError if the corpus is missing).
+try:
+    import nltk as _nltk
+    for _res in ("stopwords", "punkt", "averaged_perceptron_tagger", "punkt_tab"):
+        _nltk.download(_res, quiet=True)
+except Exception:  # pragma: no cover
+    pass
+
+try:
+    from pyresparser import ResumeParser as PyResParser
+    _HAS_PYRESPARSER = True
+except Exception:  # pragma: no cover  — catches ImportError *and* NLTK LookupError
+    _HAS_PYRESPARSER = False
+    print("[resume_parser] pyresparser not available; using fallback extraction.")
 
 
 # ---------------------------------------------------------------------------
@@ -56,6 +79,58 @@ def extract_text_from_file(file_path: str) -> str:
         return ""
 
 
+def extract_structured_data(file_path: str) -> dict:
+    """
+    Extract structured information from a resume using pyresparser.
+
+    pyresparser leverages spaCy NLP and NLTK to pull out:
+      - name, email, mobile_number
+      - skills (list)
+      - education, degree
+      - experience, total_experience
+
+    Falls back to an empty-fields dict when pyresparser is unavailable
+    or fails for a given file.
+
+    Parameters
+    ----------
+    file_path : str
+        Path to the resume file (PDF or DOCX work best with pyresparser).
+
+    Returns
+    -------
+    dict
+        Structured resume data.
+    """
+    if _HAS_PYRESPARSER:
+        try:
+            data = PyResParser(file_path).get_extracted_data()
+            return {
+                "name":             data.get("name", ""),
+                "email":            data.get("email", ""),
+                "mobile_number":    data.get("mobile_number", ""),
+                "skills":           data.get("skills", []),
+                "education":        data.get("education", []),
+                "experience":       data.get("experience", []),
+                "total_experience": data.get("total_experience", 0),
+                "degree":           data.get("degree", []),
+            }
+        except Exception as exc:
+            print(f"[resume_parser] pyresparser failed for {Path(file_path).name}: {exc}")
+
+    # Fallback: minimal structured data derived from filename
+    return {
+        "name":             Path(file_path).stem,
+        "email":            "",
+        "mobile_number":    "",
+        "skills":           [],
+        "education":        [],
+        "experience":       [],
+        "total_experience": 0,
+        "degree":           [],
+    }
+
+
 def parse_resumes_from_directory(directory: str) -> list[dict]:
     """
     Scan a directory for resume files and return a list of candidate dicts.
@@ -63,9 +138,10 @@ def parse_resumes_from_directory(directory: str) -> list[dict]:
     Each dict has the shape::
 
         {
-            "name": str,   # derived from filename (stem)
-            "file": str,   # full path
-            "text": str,   # raw extracted text
+            "name":       str,   # from pyresparser or filename stem
+            "file":       str,   # full path
+            "text":       str,   # raw extracted text
+            "structured": dict,  # structured fields from pyresparser
         }
 
     Parameters
@@ -98,10 +174,13 @@ def parse_resumes_from_directory(directory: str) -> list[dict]:
         print(f"[resume_parser] Parsing: {file_path.name}")
         text = extract_text_from_file(str(file_path))
         if text.strip():
+            structured = extract_structured_data(str(file_path))
+            candidate_name = structured.get("name") or file_path.stem
             candidates.append({
-                "name": file_path.stem,   # filename without extension
+                "name": candidate_name,
                 "file": str(file_path),
                 "text": text.strip(),
+                "structured": structured,
             })
         else:
             print(f"[resume_parser] Warning: no text extracted from {file_path.name}")
