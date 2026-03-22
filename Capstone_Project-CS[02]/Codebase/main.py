@@ -47,7 +47,7 @@ from resume_parser import parse_resumes_from_directory, extract_text_from_file
 from jd_analyzer import analyze_job_description
 from cv_scorer import score_all_cvs
 from ranker import rank_candidates, get_ranking_summary
-from report_generator import generate_report
+from report_generator import print_report, save_report_to_file
 
 
 # ---------------------------------------------------------------------------
