@@ -152,8 +152,8 @@ def build_report() -> None:
     tech_rows = [
         ("Python 3.11+",              "Core language"),
         ("Google Gemini API",         "Hosted LLM inference (free tier via AI Studio)"),
-        ("gemini-2.0-flash",          "LLM #1 -- JD analysis (fast, high-quality)"),
-        ("gemini-1.5-flash",          "LLM #2 -- CV scoring (lightweight, fast loop)"),
+        ("gemini-2.5-flash",              "LLM #1 -- JD analysis (capable, runs once)"),
+        ("gemini-2.0-flash-lite",          "LLM #2 -- CV scoring (lightweight, fast loop)"),
         ("pypdf",                     "PDF resume parsing"),
         ("python-docx",               "Word (.docx) resume parsing"),
         ("fpdf2",                     "PDF report generation"),
@@ -181,13 +181,13 @@ def build_report() -> None:
 
     _h2(pdf, "4.3  Two-LLM Pipeline")
     _body(pdf,
-        "Step 1 -- LLM #1 (gemini-2.0-flash) reads the full job "
+        "Step 1 -- LLM #1 (gemini-2.5-flash) reads the full job "
         "description and returns a structured JSON object containing mandatory "
         "skills, preferred qualifications, minimum experience, domain keywords, "
         "and a role summary. This step runs once per job opening."
     )
     _body(pdf,
-        "Step 2 -- LLM #2 (gemini-1.5-flash) is invoked once per candidate. It "
+        "Step 2 -- LLM #2 (gemini-2.0-flash-lite) is invoked once per candidate. It "
         "receives the structured requirements and the candidate's CV text, and "
         "returns numeric scores across four dimensions along with strengths, "
         "gaps, and a recruiter recommendation. A lighter model is intentionally "

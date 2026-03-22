@@ -2,8 +2,8 @@
 # Install with:
 #   pip install -r requirements.txt
 
-# Google Gemini LLM API
-google-generativeai
+# Google Gemini LLM API (new SDK - replaces deprecated google-generativeai)
+google-genai
 
 # Resume parsing
 pypdf          # PDF parsing

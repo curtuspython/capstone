@@ -28,8 +28,8 @@ Examples
     python main.py --jd jd.pdf --cvs ./resumes/ --api-key AIza... --output ./reports/
 
 Two LLMs are used:
-    LLM #1  gemini-2.0-flash  - deep job-description analysis
-    LLM #2  gemini-1.5-flash  - per-CV scoring against requirements
+    LLM #1  gemini-2.5-flash      - deep job-description analysis
+    LLM #2  gemini-2.0-flash-lite - per-CV scoring against requirements
 
 All LLM calls go through the Google Gemini API (free tier).
 Get a free API key at https://aistudio.google.com/
@@ -40,7 +40,7 @@ import os
 import sys
 from pathlib import Path
 
-import google.generativeai as genai
+import llm_client
 
 from resume_parser import parse_resumes_from_directory, extract_text_from_file
 from jd_analyzer import analyze_job_description
@@ -165,13 +165,13 @@ def _load_jd_text(jd_path: str) -> str:
 def _print_banner() -> None:
     """Print a welcome banner to stdout."""
     banner = """
-+--------------------------------------------------+
-|  CV Sorting using LLMs -- Capstone Project CS[02] |
++----------------------------------------------------+
+|  CV Sorting using LLMs -- Capstone Project CS[02]  |
 |                                                    |
-|  LLM #1 : gemini-2.0-flash  (JD analysis)         |
-|  LLM #2 : gemini-1.5-flash  (CV scoring)          |
+|  LLM #1 : gemini-2.5-flash      (JD analysis)     |
+|  LLM #2 : gemini-2.0-flash-lite (CV scoring)      |
 |  Provider: Google Gemini API (free tier)           |
-+--------------------------------------------------+
++----------------------------------------------------+
     """
     print(banner)
 
@@ -185,9 +185,9 @@ def main() -> None:
     Orchestrate the full CV sorting pipeline:
       1. Parse CLI arguments.
       2. Resolve and configure Gemini API key.
-      3. Load and analyse the job description (LLM #1 - gemini-2.0-flash).
+      3. Load and analyse the job description (LLM #1 - gemini-2.5-flash).
       4. Parse all candidate CVs from the given directory.
-      5. Score each CV against the job requirements (LLM #2 - gemini-1.5-flash).
+      5. Score each CV against the job requirements (LLM #2 - gemini-2.0-flash-lite).
       6. Rank candidates by composite score.
       7. Print results to terminal and write reports to disk.
     """
@@ -196,9 +196,9 @@ def main() -> None:
     parser = _build_parser()
     args = parser.parse_args()
 
-    # Step 1: Resolve API key and configure Gemini globally
+    # Step 1: Resolve API key and initialise shared Gemini client
     api_key = _resolve_api_key(args.api_key)
-    genai.configure(api_key=api_key)
+    llm_client.init(api_key)
     print("[main] Google Gemini API configured.")
 
     # Step 2: Load job description
@@ -206,8 +206,8 @@ def main() -> None:
     jd_text = _load_jd_text(args.jd)
     print(f"[main] Job description loaded ({len(jd_text)} characters).")
 
-    # Step 3: Analyse JD with LLM #1 (gemini-2.0-flash)
-    print("\n[main] Step 1/4 -- Analysing job description with LLM #1 (gemini-2.0-flash) ...")
+    # Step 3: Analyse JD with LLM #1 (gemini-2.5-flash)
+    print("\n[main] Step 1/4 -- Analysing job description with LLM #1 (gemini-2.5-flash) ...")
     requirements = analyze_job_description(jd_text)
     print(f"[main] Job title detected : {requirements.get('title', 'N/A')}")
     print(f"[main] Must-have skills   : {len(requirements.get('must_have', []))} extracted")
@@ -221,8 +221,8 @@ def main() -> None:
         sys.exit(1)
     print(f"[main] {len(candidates)} candidate(s) loaded.")
 
-    # Step 5: Score each CV with LLM #2 (gemini-1.5-flash)
-    print(f"\n[main] Step 3/4 -- Scoring {len(candidates)} CV(s) with LLM #2 (gemini-1.5-flash) ...")
+    # Step 5: Score each CV with LLM #2 (gemini-2.0-flash-lite)
+    print(f"\n[main] Step 3/4 -- Scoring {len(candidates)} CV(s) with LLM #2 (gemini-2.0-flash-lite) ...")
     scored_candidates = score_all_cvs(candidates, requirements)
 
     # Step 6: Rank candidates

@@ -1,7 +1,7 @@
 """
 jd_analyzer.py
 --------------
-Uses LLM #1 (Google Gemini: gemini-2.0-flash) to extract structured
+Uses LLM #1 (Google Gemini: gemini-2.5-flash) to extract structured
 requirements from a raw job description text.
 
 The LLM parses the job description and returns a JSON object with:
@@ -19,14 +19,17 @@ LLM step is easy to swap, test, or extend without touching the other.
 import json
 import re
 
-import google.generativeai as genai
+from google.genai import types
+
+import llm_client
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
-# LLM #1 - used for deep understanding of the job description
-JD_MODEL = "gemini-2.0-flash"
+# LLM #1 - gemini-2.5-flash: capable model used for deep JD understanding.
+# Runs only once per session so the higher-capability model is justified.
+JD_MODEL = "gemini-2.5-flash"
 
 _SYSTEM_INSTRUCTION = (
     "You are an expert HR consultant and technical recruiter. "
@@ -62,8 +65,7 @@ def analyze_job_description(jd_text: str) -> dict:
     """
     Extract structured hiring criteria from a job description.
 
-    Requires google.generativeai to be configured with an API key
-    before calling (via genai.configure in main.py).
+    Uses the shared Gemini client initialised by llm_client.init() in main.py.
 
     Parameters
     ----------
@@ -83,17 +85,17 @@ def analyze_job_description(jd_text: str) -> dict:
     """
     print(f"[jd_analyzer] Analysing JD with model: {JD_MODEL}")
 
-    model = genai.GenerativeModel(
-        model_name=JD_MODEL,
-        system_instruction=_SYSTEM_INSTRUCTION,
-    )
+    client = llm_client.get()  # retrieve shared client from llm_client module
 
     prompt = _USER_PROMPT_TEMPLATE.format(jd_text=jd_text[:8000])  # guard token limit
 
-    response = model.generate_content(
-        prompt,
-        generation_config=genai.GenerationConfig(
-            temperature=0.1,    # low temp -> consistent, deterministic output
+    # Call the new google-genai SDK: system_instruction lives in GenerateContentConfig
+    response = client.models.generate_content(
+        model=JD_MODEL,
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            system_instruction=_SYSTEM_INSTRUCTION,
+            temperature=0.1,       # low temp -> consistent, deterministic output
             max_output_tokens=1024,
         ),
     )

@@ -1,7 +1,7 @@
 """
 cv_scorer.py
 ------------
-Uses LLM #2 (Google Gemini: gemini-1.5-flash) to score a single candidate
+Uses LLM #2 (Google Gemini: gemini-2.0-flash-lite) to score a single candidate
 CV against the structured job requirements extracted by jd_analyzer.py.
 
 For each CV the LLM returns:
@@ -14,23 +14,26 @@ For each CV the LLM returns:
   - gaps               : list[str] (top 3 missing areas)
   - recommendation     : str  (1-2 sentence recruiter note)
 
-Using gemini-1.5-flash (lighter/faster) here keeps costs low while still
+Using gemini-2.0-flash-lite (lighter/faster) here keeps costs low while still
 providing meaningful per-candidate scoring. The separation from
 jd_analyzer lets us run scoring in a loop without re-running the heavier
-gemini-2.0-flash model for every single CV.
+gemini-2.5-flash model for every single CV.
 """
 
 import json
 import re
 
-import google.generativeai as genai
+from google.genai import types
+
+import llm_client
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
-# LLM #2 - lighter, faster model used for per-CV scoring loop
-SCORER_MODEL = "gemini-1.5-flash"
+# LLM #2 - gemini-2.0-flash-lite: lightweight, fast model used for the
+# per-CV scoring loop. Keeps latency and cost low across many candidates.
+SCORER_MODEL = "gemini-2.0-flash-lite"
 
 _SYSTEM_INSTRUCTION = (
     "You are a senior technical recruiter. "
@@ -78,8 +81,7 @@ def score_cv(candidate: dict, requirements: dict) -> dict:
     """
     Score a single candidate CV against the extracted job requirements.
 
-    Requires google.generativeai to be configured with an API key
-    before calling (via genai.configure in main.py).
+    Uses the shared Gemini client initialised by llm_client.init() in main.py.
 
     Parameters
     ----------
@@ -97,10 +99,7 @@ def score_cv(candidate: dict, requirements: dict) -> dict:
     candidate_name = candidate.get("name", "Unknown")
     print(f"[cv_scorer] Scoring: {candidate_name} (model: {SCORER_MODEL})")
 
-    model = genai.GenerativeModel(
-        model_name=SCORER_MODEL,
-        system_instruction=_SYSTEM_INSTRUCTION,
-    )
+    client = llm_client.get()  # retrieve shared client from llm_client module
 
     # Truncate CV text to avoid exceeding context length
     cv_text_trunc = candidate["text"][:6000]
@@ -111,9 +110,12 @@ def score_cv(candidate: dict, requirements: dict) -> dict:
         cv_text=cv_text_trunc,
     )
 
-    response = model.generate_content(
-        prompt,
-        generation_config=genai.GenerationConfig(
+    # Call the new google-genai SDK: system_instruction lives in GenerateContentConfig
+    response = client.models.generate_content(
+        model=SCORER_MODEL,
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            system_instruction=_SYSTEM_INSTRUCTION,
             temperature=0.15,
             max_output_tokens=768,
         ),

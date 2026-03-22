@@ -222,8 +222,8 @@ def build_docx() -> None:
     _add_kv_table(doc, [
         ("Python 3.11+",       "Core programming language"),
         ("Google Gemini API",  "Free hosted LLM inference via Google AI Studio"),
-        ("gemini-2.0-flash",   "LLM #1 -- Job description analysis"),
-        ("gemini-1.5-flash",   "LLM #2 -- Per-CV scoring (faster, lightweight)"),
+        ("gemini-2.5-flash",          "LLM #1 -- Job description analysis"),
+        ("gemini-2.0-flash-lite",      "LLM #2 -- Per-CV scoring (lightweight, fast loop)"),
         ("pypdf",              "PDF resume text extraction"),
         ("python-docx",        "Word (.docx) resume and report handling"),
         ("fpdf2",              "PDF report generation"),
@@ -245,13 +245,13 @@ def build_docx() -> None:
     # 4.3 Pipeline
     _add_heading(doc, "4.3  Two-LLM Pipeline", level=2)
     _add_body(doc,
-        "Step 1 -- LLM #1 (gemini-2.0-flash) reads the full job description "
-        "and returns a structured JSON object containing mandatory skills, "
-        "preferred qualifications, minimum experience, domain keywords, and a "
-        "role summary. This step runs once per job opening."
+        "Step 1 -- LLM #1 (gemini-2.5-flash) reads the full job description "
+        "and returns a structured JSON object containing mandatory "
+        "skills, preferred qualifications, minimum experience, domain keywords, "
+        "and a role summary. This step runs once per job opening."
     )
     _add_body(doc,
-        "Step 2 -- LLM #2 (gemini-1.5-flash) is invoked once per candidate. "
+        "Step 2 -- LLM #2 (gemini-2.0-flash-lite) is invoked once per candidate. "
         "It receives the structured requirements and the candidate's CV text, "
         "and returns numeric scores across four dimensions along with strengths, "
         "gaps, and a recruiter recommendation. A lighter model is used here "
