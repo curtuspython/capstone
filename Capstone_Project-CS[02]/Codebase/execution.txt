@@ -16,16 +16,32 @@
 #   Candidate CVs  : .txt  |  .pdf  |  .docx  |  .md
 #
 # ==============================================================================
+# VERSIONS
+# ==============================================================================
+#
+#   Python           : 3.11 or higher (tested on 3.13)
+#
+#   LLM Models (Google Gemini):
+#     LLM #1         : gemini-2.5-flash  (job description analysis)
+#     LLM #2         : gemini-2.5-flash  (per-CV scoring loop)
+#
+#   Python Packages (pinned versions used during development):
+#     google-genai   : 1.68.0   ->  Gemini API client (new SDK)
+#     pypdf          : 6.9.1    ->  PDF resume parsing
+#     python-docx    : 1.2.0    ->  Word (.docx) resume parsing
+#     fpdf2          : 2.8.7    ->  PDF report generation
+#
+# ==============================================================================
 # STEP 1 - INSTALL DEPENDENCIES
 # ==============================================================================
 #
 #   pip install -r requirements.txt
 #
 #   Packages installed:
-#     google-genai         ->  Gemini API client (new SDK)
-#     pypdf                ->  PDF resume parsing
-#     python-docx          ->  Word (.docx) resume parsing
-#     fpdf2                ->  PDF report generation
+#     google-genai==1.68.0   ->  Gemini API client (new SDK)
+#     pypdf==6.9.1           ->  PDF resume parsing
+#     python-docx==1.2.0     ->  Word (.docx) resume parsing
+#     fpdf2==2.8.7           ->  PDF report generation
 #
 # ==============================================================================
 # STEP 2 - GET A FREE GEMINI API KEY

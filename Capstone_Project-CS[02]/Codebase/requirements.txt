@@ -1,13 +1,15 @@
 # CV Sorting using LLMs (CS[02]) - Python Dependencies
 # Install with:
 #   pip install -r requirements.txt
+#
+# Versions tested during development (Python 3.13):
 
 # Google Gemini LLM API (new SDK - replaces deprecated google-generativeai)
-google-genai
+google-genai==1.68.0
 
 # Resume parsing
-pypdf          # PDF parsing
-python-docx    # Word (.docx) parsing
+pypdf==6.9.1          # PDF parsing
+python-docx==1.2.0    # Word (.docx) parsing
 
 # PDF report generation
-fpdf2
+fpdf2==2.8.7
