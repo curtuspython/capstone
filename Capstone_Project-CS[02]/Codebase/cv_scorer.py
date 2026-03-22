@@ -6,7 +6,7 @@ CV against the structured job requirements extracted by jd_analyzer.py (LLM #1).
 
 LangChain serves as the orchestrator for:
   - Prompt templating (ChatPromptTemplate) — takes structured resume data
-    (from pyresparser) and parsed job description as input.
+    (from spaCy NER) and parsed job description as input.
   - LLM invocation (ChatGoogleGenerativeAI via langchain-google-genai)
   - Structured JSON output parsing (JsonOutputParser) — scores per requirement
     plus an overall fit score with explanation.
@@ -59,7 +59,7 @@ Score the following candidate resume against the job requirements.
 Job Requirements (JSON):
 {requirements_json}
 
-Candidate Structured Profile (extracted via pyresparser):
+Candidate Structured Profile (extracted via spaCy NER):
 {structured_data}
 
 Candidate CV (Full Text):
@@ -96,9 +96,9 @@ def score_cv(candidate: dict, requirements: dict, model: str = SCORER_MODEL) -> 
     """
     Score a single candidate CV against the extracted job requirements.
 
-    Uses LangChain to orchestrate the prompt → LLM → JSON parser chain.
+    uses LangChain to orchestrate the prompt → LLM → JSON parser chain.
     The prompt template takes both the structured resume data (from
-    pyresparser) and the parsed job description as input, and asks the LLM
+    spaCy NER) and the parsed job description as input, and asks the LLM
     to score the match for each requirement and generate an overall fit
     score with an explanation.
 
@@ -132,7 +132,7 @@ def score_cv(candidate: dict, requirements: dict, model: str = SCORER_MODEL) -> 
     parser = JsonOutputParser()
     chain = prompt | llm | parser
 
-    # Prepare structured data from pyresparser (if available)
+    # Prepare structured data from spaCy NER (if available)
     structured = candidate.get("structured", {})
     structured_str = json.dumps(structured, indent=2) if structured else "N/A"
 

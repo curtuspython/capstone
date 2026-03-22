@@ -1,19 +1,19 @@
 # CV Sorting using LLMs (CS[02]) - Python Dependencies
 # Install with:
 #   pip install -r requirements.txt
+#   python -m spacy download en_core_web_sm
 #
-# Versions tested during development (Python 3.11+):
+# Versions tested during development (Python 3.11+ / 3.13):
 
 # Google Gemini LLM API (new SDK)
 google-genai>=1.68.0
 
-# LangChain - Orchestrator for prompt-based matching, score aggregation,
-#             and structured output parsing
+# LangChain — orchestrator for prompt templates, LLM chaining, JSON parsing
 langchain>=0.3.0
 langchain-google-genai>=2.0.0
 langchain-core>=0.3.0
 
-# LlamaIndex - Semantic candidate-job matching framework
+# LlamaIndex — semantic candidate-job matching framework
 llama-index-core>=0.12.0
 llama-index-llms-gemini>=0.4.0
 llama-index-embeddings-gemini>=0.3.0
@@ -21,11 +21,12 @@ llama-index-embeddings-gemini>=0.3.0
 # Resume parsing
 pypdf>=6.9.0              # PDF text extraction
 python-docx>=1.1.0        # Word (.docx) text extraction
-pyresparser>=1.0.6        # Structured information extraction from resumes
 
-# NLP dependencies (used by pyresparser for entity recognition)
+# NLP — spaCy 3.x for NER-based structured resume extraction
+# (replaces pyresparser which is incompatible with spaCy 3.x / Python 3.11+)
 spacy>=3.0.0
-nltk>=3.8.0
+# After installing: python -m spacy download en_core_web_sm
+# (resume_parser.py auto-downloads this model on first run)
 
 # PDF report generation
 fpdf2>=2.8.0

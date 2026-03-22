@@ -461,7 +461,7 @@ def _cmd_show(ranked: list[dict], arg: str) -> None:
 
     Prints dimension-level scores, strengths (supporting evidence), gaps
     (areas of concern), recruiter recommendation, and structured profile
-    data extracted by pyresparser — all in the terminal.
+    data extracted by spaCy NER — all in the terminal.
     """
     try:
         rank_num = int(arg)
@@ -505,10 +505,10 @@ def _cmd_show(ranked: list[dict], arg: str) -> None:
     print()
     print(f"  Recruiter Note: {scores.get('recommendation', 'N/A')}")
 
-    # Show pyresparser structured data if available
+    # Show spaCy NER structured data if available
     if structured and any(structured.get(k) for k in ["skills", "education", "degree"]):
         print()
-        print("  Structured Profile (pyresparser):")
+        print("  Structured Profile (spaCy NER):")
         if structured.get("skills"):
             print(f"    Skills     : {', '.join(structured['skills'][:15])}")
         if structured.get("education"):

@@ -6,7 +6,7 @@
 #   Reads a job description + a folder of candidate CVs, scores every CV
 #   using two Google Gemini LLMs orchestrated by LangChain, computes
 #   semantic similarity via LlamaIndex embeddings, extracts structured
-#   resume data via pyresparser, ranks candidates by a weighted composite
+#   resume data via spaCy NER, ranks candidates by a weighted composite
 #   score, and exports results as TXT + CSV reports. Supports an optional
 #   terminal-based interactive mode for real-time query refinement.
 #
@@ -16,8 +16,8 @@
 #                           output parsing (ChatPromptTemplate + JsonOutputParser)
 #   LlamaIndex          ->  Semantic candidate-job matching via Gemini embeddings
 #                           (text-embedding-004)
-#   pyresparser         ->  Structured information extraction from PDF/Word
-#                           resumes (name, skills, education, experience)
+#   spaCy 3.x NER        ->  Structured information extraction from resumes
+#                             (replaces pyresparser; compatible with Python 3.11+)
 #   --interactive mode  ->  Terminal-based query refinement (no GUI required)
 #
 # TWO LLMs USED:
@@ -44,7 +44,9 @@
 #     langchain-google-genai   >=2.0.0   ->  LangChain <-> Gemini integration
 #     llama-index-core         >=0.12.0  ->  LlamaIndex framework
 #     llama-index-embeddings-gemini >=0.3.0 -> Gemini embedding model
-#     pyresparser              >=1.0.6   ->  Structured resume extraction
+#     spacy                   >=3.0.0   ->  NER-based resume extraction
+#     # After install: python -m spacy download en_core_web_sm
+#     # (auto-downloaded on first run by resume_parser.py)
 #     pypdf                    >=6.9.0   ->  PDF resume parsing
 #     python-docx              >=1.1.0   ->  Word (.docx) resume parsing
 #     fpdf2                    >=2.8.0   ->  PDF report generation
@@ -55,7 +57,7 @@
 #
 #   pip install -r requirements.txt
 #
-#   (Optional) If pyresparser needs a spaCy model:
+#   (Optional) Download the spaCy English model if not auto-downloaded:
 #     python -m spacy download en_core_web_sm
 #
 # ==============================================================================
@@ -200,7 +202,7 @@
 #                             LangChain ChatGoogleGenerativeAI, LlamaIndex
 #                             GeminiEmbedding)
 #   resume_parser.py     ->  Extracts raw text (pypdf / python-docx) +
-#                             structured data (pyresparser) from resumes
+#                             structured data (spaCy NER) from resumes
 #   jd_analyzer.py       ->  LLM #1 via LangChain — structured JD extraction
 #   cv_scorer.py         ->  LLM #2 via LangChain — per-CV scoring with
 #                             structured resume data + parsed JD as input

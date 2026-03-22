@@ -207,7 +207,7 @@ def build_report() -> None:
     _para(pdf,
         "This project builds an automated CV ranking pipeline using two "
         "Google Gemini LLMs orchestrated by LangChain. Resumes are parsed "
-        "with pyresparser for structured extraction, and LlamaIndex Gemini "
+        "with spaCy NER for structured extraction, and LlamaIndex Gemini "
         "embeddings add semantic similarity scoring. Candidates are ranked "
         "across five weighted dimensions, with results exported as TXT/CSV "
         "reports and an interactive terminal mode for real-time refinement."
@@ -230,7 +230,7 @@ def build_report() -> None:
     )
 
     _section(pdf, "3. Objectives")
-    _bullet(pdf, "Parse resumes and extract structured profiles via pyresparser.")
+    _bullet(pdf, "Parse resumes and extract structured profiles via spaCy 3.x NER.")
     _bullet(pdf, "Analyse JD using LangChain + Gemini (LLM #1: gemini-2.5-flash).")
     _bullet(pdf, "Score each CV on 5 dimensions via LangChain + Gemini (LLM #2: gemini-2.5-pro).")
     _bullet(pdf, "Add LlamaIndex semantic similarity into composite scoring.")
@@ -250,7 +250,7 @@ def build_report() -> None:
             ("Google Gemini API",    "LLM inference (google-genai SDK)"),
             ("LangChain",            "Prompt orchestration + output parsing"),
             ("LlamaIndex",           "Semantic similarity via Gemini embeddings"),
-            ("pyresparser",          "Structured resume extraction"),
+            ("spaCy 3.x",             "NER-based structured resume extraction (replaces pyresparser)"),
             ("pypdf / python-docx",  "PDF and Word text extraction"),
             ("fpdf2",                "PDF report generation (open-source)"),
         ],
@@ -263,7 +263,7 @@ def build_report() -> None:
         rows=[
             ("main.py",             "CLI entry point + --interactive mode"),
             ("llm_client.py",       "Gemini client (genai, LangChain, LlamaIndex)"),
-            ("resume_parser.py",    "Text extraction + pyresparser profiles"),
+            ("resume_parser.py",    "Text extraction + spaCy NER structured profiles"),
             ("jd_analyzer.py",      "LLM #1: structured JD extraction"),
             ("cv_scorer.py",        "LLM #2: per-CV multi-dimension scoring"),
             ("ranker.py",           "Composite + semantic similarity scoring"),
@@ -277,7 +277,7 @@ def build_report() -> None:
         "LLM #1 (gemini-2.5-flash) extracts structured JD requirements "
         "via a LangChain chain (ChatPromptTemplate + JsonOutputParser). "
         "LLM #2 (gemini-2.5-pro) scores each CV using structured JD + "
-        "pyresparser profile + raw CV text, producing dimension scores "
+        "spaCy NER profile + raw CV text, producing dimension scores "
         "and narrative feedback."
     )
 
@@ -332,7 +332,7 @@ def build_report() -> None:
     # ---- Conclusion ----
     _section(pdf, "6. Conclusion")
     _para(pdf,
-        "The multi-framework pipeline (LangChain + LlamaIndex + pyresparser "
+        "The multi-framework pipeline (LangChain + LlamaIndex + spaCy NER "
         "+ Gemini) automates CV screening with high accuracy and full "
         "transparency. The modular design allows swapping any component "
         "independently. The interactive terminal mode enables real-time "

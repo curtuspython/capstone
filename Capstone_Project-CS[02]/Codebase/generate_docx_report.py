@@ -157,7 +157,7 @@ def build_docx() -> None:
     _add_body(doc,
         "This project implements an automated CV (resume) ranking pipeline that "
         "uses two Google Gemini LLMs orchestrated by LangChain, with LlamaIndex "
-        "for semantic similarity scoring and pyresparser for structured resume "
+        "for semantic similarity scoring and spaCy NER for structured resume "
         "extraction. LLM #1 (gemini-2.5-flash) analyses the job description "
         "once to extract structured hiring criteria; LLM #2 (gemini-2.5-pro) "
         "scores each candidate CV against those criteria across five dimensions. "
@@ -226,7 +226,7 @@ def build_docx() -> None:
         ("gemini-2.5-pro",            "LLM #2 -- Per-CV scoring (runs per candidate)"),
         ("LangChain",               "Orchestration + structured output parsing"),
         ("LlamaIndex",                "Semantic matching via Gemini text-embedding-004"),
-        ("pyresparser",               "Structured resume field extraction"),
+        ("spaCy 3.x",               "NER-based structured resume extraction"),
         ("pypdf / python-docx",       "Raw text extraction from PDF and DOCX files"),
         ("fpdf2",                     "PDF project report generation"),
     ])
@@ -236,7 +236,7 @@ def build_docx() -> None:
     _add_kv_table(doc, [
         ("main.py",              "CLI entry point + --interactive query refinement mode"),
         ("llm_client.py",        "Shared client: google-genai, LangChain, LlamaIndex"),
-        ("resume_parser.py",     "Text extraction (pypdf/docx) + pyresparser profiles"),
+        ("resume_parser.py",     "Text extraction (pypdf/docx) + spaCy NER profiles"),
         ("jd_analyzer.py",       "LangChain chain: LLM #1 structured JD extraction"),
         ("cv_scorer.py",         "LangChain chain: LLM #2 multi-dimension CV scoring"),
         ("ranker.py",            "LlamaIndex semantic score + weighted composite rank"),
@@ -247,7 +247,7 @@ def build_docx() -> None:
     _add_heading(doc, "4.3  Two-LLM Pipeline with LangChain and LlamaIndex", level=2)
     _add_body(doc,
         "Step 1 -- Resume Parsing: pypdf / python-docx extract raw text from "
-        "each CV. pyresparser uses spaCy NLP to extract structured fields "
+        "each CV. spaCy NER extracts structured fields "
         "(name, skills, education, experience) for richer LLM context."
     )
     _add_body(doc,
@@ -259,7 +259,7 @@ def build_docx() -> None:
     _add_body(doc,
         "Step 3 -- CV Scoring (LangChain + LLM #2, gemini-2.5-pro): a second "
         "LangChain chain evaluates each CV using structured JD requirements + "
-        "pyresparser profile + raw CV text. Returns scores on four dimensions "
+        "spaCy NER profile + raw CV text. Returns scores on four dimensions "
         "plus strengths, gaps, and a recruiter recommendation per candidate."
     )
     _add_body(doc,

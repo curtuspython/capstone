@@ -3,20 +3,23 @@ resume_parser.py
 ----------------
 Parses candidate resumes from PDF, DOCX, or plain-text files and returns
 structured candidate dictionaries containing both raw text and structured
-data extracted via pyresparser.
+data.
 
 Parsing stack:
-  - pyresparser   : structured information extraction (name, email, skills,
-                     education, experience) as required by the project spec.
-  - pypdf          : PDF text extraction
-  - python-docx    : Word (.docx) text extraction
-  - Built-in open(): plain-text (.txt / .md) reading
+  - spaCy 3.x (en_core_web_sm) : Named-Entity Recognition for name/orgs,
+                                   replaces pyresparser (broken on spaCy 3.x).
+  - Regex                       : email, phone, years-of-experience extraction.
+  - Keyword matching            : skill detection against a broad tech list.
+  - pypdf                       : PDF text extraction.
+  - python-docx                 : Word (.docx) text extraction.
+  - Built-in open()             : plain-text (.txt / .md) reading.
 
-If pyresparser is not installed or fails for a particular file, the module
-falls back gracefully to filename-based naming and empty structured fields.
+Note on pyresparser: pyresparser targets spaCy 2.x and ships a config.cfg
+that is incompatible with spaCy 3.x (raises E053). It is not used here;
+structured extraction is implemented directly with spaCy 3.x NER + regex.
 """
 
-import os
+import re
 from pathlib import Path
 
 try:
@@ -29,33 +32,65 @@ try:
 except ImportError:  # pragma: no cover
     DocxDocument = None  # type: ignore
 
-# pyresparser — structured resume information extraction (project requirement)
-# Ensure NLTK data and spaCy model are available before importing pyresparser.
-try:
-    import nltk as _nltk
-    for _res in ("stopwords", "punkt", "averaged_perceptron_tagger", "punkt_tab"):
-        _nltk.download(_res, quiet=True)
-except Exception:  # pragma: no cover
-    pass
+# ---------------------------------------------------------------------------
+# spaCy NLP model — loaded once at module level for performance.
+# Auto-downloads en_core_web_sm on first run if the model is missing.
+# ---------------------------------------------------------------------------
+_NLP = None  # lazy-loaded in _get_nlp()
 
-try:
-    import spacy as _spacy
+
+def _get_nlp():
+    """Return the shared spaCy NLP model, loading/downloading on first call."""
+    global _NLP
+    if _NLP is not None:
+        return _NLP
     try:
-        _spacy.load("en_core_web_sm")
-    except OSError:
-        # Model missing — download it automatically so pyresparser can run.
-        print("[resume_parser] Downloading spaCy model 'en_core_web_sm' (first-run, one-time) ...")
-        from spacy.cli import download as _spacy_dl  # noqa: PLC0415
-        _spacy_dl("en_core_web_sm")
-except Exception:  # pragma: no cover
-    pass
+        import spacy  # noqa: PLC0415
+        try:
+            _NLP = spacy.load("en_core_web_sm")
+        except OSError:
+            print("[resume_parser] Downloading spaCy model 'en_core_web_sm' (one-time) ...")
+            from spacy.cli import download as _dl  # noqa: PLC0415
+            _dl("en_core_web_sm")
+            _NLP = spacy.load("en_core_web_sm")
+        return _NLP
+    except Exception as exc:  # pragma: no cover
+        print(f"[resume_parser] spaCy unavailable ({exc}); NER extraction disabled.")
+        return None
 
-try:
-    from pyresparser import ResumeParser as PyResParser
-    _HAS_PYRESPARSER = True
-except Exception:  # pragma: no cover  — catches ImportError *and* NLTK LookupError
-    _HAS_PYRESPARSER = False
-    print("[resume_parser] pyresparser not available; using fallback extraction.")
+
+# ---------------------------------------------------------------------------
+# Common tech/professional skills keyword list for matching against CV text.
+# Kept intentionally broad — LLM #2 does the nuanced matching; this is a
+# lightweight signal for structured data context.
+# ---------------------------------------------------------------------------
+_SKILL_KEYWORDS = [
+    # Languages
+    "python", "java", "javascript", "typescript", "c++", "c#", "go", "rust",
+    "ruby", "swift", "kotlin", "scala", "r", "matlab", "bash", "sql",
+    # Web / backend
+    "fastapi", "django", "flask", "spring", "express", "node.js", "nodejs",
+    "react", "vue", "angular", "html", "css", "rest", "graphql", "grpc",
+    # Data / ML / AI
+    "machine learning", "deep learning", "nlp", "llm", "tensorflow", "pytorch",
+    "keras", "scikit-learn", "pandas", "numpy", "spark", "hadoop",
+    "langchain", "llamaindex", "openai", "gemini",
+    # Cloud / DevOps
+    "aws", "azure", "gcp", "docker", "kubernetes", "terraform", "ci/cd",
+    "jenkins", "github actions", "linux",
+    # Databases
+    "postgresql", "mysql", "mongodb", "redis", "elasticsearch", "sqlite",
+    "cassandra", "bigquery", "snowflake",
+    # General
+    "git", "agile", "scrum", "microservices", "api",
+]
+
+_DEGREE_KEYWORDS = [
+    "bachelor", "b.sc", "b.s.", "b.e.", "b.tech",
+    "master", "m.sc", "m.s.", "m.e.", "m.tech", "mba",
+    "phd", "ph.d", "doctorate",
+    "associate", "diploma",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -90,48 +125,130 @@ def extract_text_from_file(file_path: str) -> str:
         return ""
 
 
-def extract_structured_data(file_path: str) -> dict:
+def extract_structured_data(file_path: str, text: str = "") -> dict:
     """
-    Extract structured information from a resume using pyresparser.
+    Extract structured information from a resume using spaCy 3.x NER + regex.
 
-    pyresparser leverages spaCy NLP and NLTK to pull out:
-      - name, email, mobile_number
-      - skills (list)
-      - education, degree
-      - experience, total_experience
-
-    Falls back to an empty-fields dict when pyresparser is unavailable
-    or fails for a given file.
+    Replaces pyresparser (which is incompatible with spaCy 3.x) with a
+    direct spaCy Named-Entity Recognition approach. Extracts:
+      - name           : first PERSON entity found by NER
+      - email          : regex
+      - mobile_number  : regex
+      - skills         : keyword match against _SKILL_KEYWORDS
+      - education      : lines containing university/college/institute keywords
+      - degree         : degree-level keywords found in text
+      - experience     : lines containing job-title / experience section markers
+      - total_experience: first N-year(s) pattern found (e.g. '5 years')
 
     Parameters
     ----------
     file_path : str
-        Path to the resume file (PDF or DOCX work best with pyresparser).
+        Path to the resume (used only for filename-stem fallback name).
+    text : str
+       acted raw text of the resume. If empty, falls back to
+        filename stem for name and empty lists for all other fields.
 
     Returns
     -------
     dict
-        Structured resume data.
+        Structured resume data with consistent keys.
     """
-    if _HAS_PYRESPARSER:
-        try:
-            data = PyResParser(file_path).get_extracted_data()
-            return {
-                "name":             data.get("name", ""),
-                "email":            data.get("email", ""),
-                "mobile_number":    data.get("mobile_number", ""),
-                "skills":           data.get("skills", []),
-                "education":        data.get("education", []),
-                "experience":       data.get("experience", []),
-                "total_experience": data.get("total_experience", 0),
-                "degree":           data.get("degree", []),
-            }
-        except Exception as exc:
-            print(f"[resume_parser] pyresparser failed for {Path(file_path).name}: {exc}")
+    stem = Path(file_path).stem
 
-    # Fallback: minimal structured data derived from filename
+    if not text.strip():
+        return _empty_structured(stem)
+
+    text_lower = text.lower()
+
+    # -- Name via spaCy NER (PERSON entity) ----------------------------------
+    name = _extract_name_ner(text) or stem
+
+    # -- Email ----------------------------------------------------------------
+    email_match = re.search(
+        r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}", text
+    )
+    email = email_match.group(0) if email_match else ""
+
+    # -- Phone ----------------------------------------------------------------
+    phone_match = re.search(
+        r"(?:\+?\d[\d\s\-().]{7,14}\d)", text
+    )
+    mobile = phone_match.group(0).strip() if phone_match else ""
+
+    # -- Skills (keyword intersection) ----------------------------------------
+    skills = [
+        kw for kw in _SKILL_KEYWORDS
+        if re.search(r"\b" + re.escape(kw) + r"\b", text_lower)
+    ]
+
+    # -- Degrees --------------------------------------------------------------
+    degree = [
+        kw.title() for kw in _DEGREE_KEYWORDS
+        if re.search(r"\b" + re.escape(kw) + r"\b", text_lower)
+    ]
+
+    # -- Education lines ------------------------------------------------------
+    edu_keywords = (
+        "university", "college", "institute", "school", "academy",
+        "b.sc", "m.sc", "b.tech", "m.tech", "bachelor", "master",
+        "phd", "mba", "diploma",
+    )
+    education = [
+        line.strip() for line in text.splitlines()
+        if any(kw in line.lower() for kw in edu_keywords) and line.strip()
+    ][:6]  # cap at 6 lines
+
+    # -- Experience lines / sections ------------------------------------------
+    exp_keywords = (
+        "experience", "engineer", "developer", "analyst", "manager",
+        "intern", "worked", "responsible", "led", "built", "designed",
+    )
+    experience = [
+        line.strip() for line in text.splitlines()
+        if any(kw in line.lower() for kw in exp_keywords) and line.strip()
+    ][:8]  # cap at 8 lines
+
+    # -- Total experience (e.g. '5 years of experience') ----------------------
+    yrs_match = re.search(
+        r"(\d+(?:\.\d+)?)\s*\+?\s*year[s]?", text_lower
+    )
+    total_experience = float(yrs_match.group(1)) if yrs_match else 0
+
     return {
-        "name":             Path(file_path).stem,
+        "name":             name,
+        "email":            email,
+        "mobile_number":    mobile,
+        "skills":           skills,
+        "education":        education,
+        "experience":       experience,
+        "total_experience": total_experience,
+        "degree":           degree,
+    }
+
+
+def _extract_name_ner(text: str) -> str:
+    """
+    Use spaCy NER to find the first PERSON entity in the resume text.
+
+    Looks only at the first 500 characters where the candidate's name
+    typically appears (header / contact section).
+
+    Returns an empty string if spaCy is unavailable or no PERSON found.
+    """
+    nlp = _get_nlp()
+    if nlp is None:
+        return ""
+    doc = nlp(text[:500])
+    for ent in doc.ents:
+        if ent.label_ == "PERSON":
+            return ent.text.strip()
+    return ""
+
+
+def _empty_structured(name: str) -> dict:
+    """Return a zeroed-out structured dict used as a safe fallback."""
+    return {
+        "name":             name,
         "email":            "",
         "mobile_number":    "",
         "skills":           [],
@@ -149,10 +266,10 @@ def parse_resumes_from_directory(directory: str) -> list[dict]:
     Each dict has the shape::
 
         {
-            "name":       str,   # from pyresparser or filename stem
+            "name":       str,   # from spaCy NER or filename stem
             "file":       str,   # full path
             "text":       str,   # raw extracted text
-            "structured": dict,  # structured fields from pyresparser
+            "structured": dict,  # structured fields from spaCy NER
         }
 
     Parameters
@@ -185,7 +302,7 @@ def parse_resumes_from_directory(directory: str) -> list[dict]:
         print(f"[resume_parser] Parsing: {file_path.name}")
         text = extract_text_from_file(str(file_path))
         if text.strip():
-            structured = extract_structured_data(str(file_path))
+            structured = extract_structured_data(str(file_path), text=text)
             candidate_name = structured.get("name") or file_path.stem
             candidates.append({
                 "name": candidate_name,
