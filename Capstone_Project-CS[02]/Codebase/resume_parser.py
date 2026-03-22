@@ -30,12 +30,23 @@ except ImportError:  # pragma: no cover
     DocxDocument = None  # type: ignore
 
 # pyresparser — structured resume information extraction (project requirement)
-# Ensure NLTK data is available before importing pyresparser (it needs stopwords
-# at module-load time and raises LookupError if the corpus is missing).
+# Ensure NLTK data and spaCy model are available before importing pyresparser.
 try:
     import nltk as _nltk
     for _res in ("stopwords", "punkt", "averaged_perceptron_tagger", "punkt_tab"):
         _nltk.download(_res, quiet=True)
+except Exception:  # pragma: no cover
+    pass
+
+try:
+    import spacy as _spacy
+    try:
+        _spacy.load("en_core_web_sm")
+    except OSError:
+        # Model missing — download it automatically so pyresparser can run.
+        print("[resume_parser] Downloading spaCy model 'en_core_web_sm' (first-run, one-time) ...")
+        from spacy.cli import download as _spacy_dl  # noqa: PLC0415
+        _spacy_dl("en_core_web_sm")
 except Exception:  # pragma: no cover
     pass
 

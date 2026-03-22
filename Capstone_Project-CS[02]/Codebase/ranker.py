@@ -39,11 +39,17 @@ WEIGHTS = {
 
 def compute_semantic_scores(candidates: list[dict], jd_text: str) -> list[dict]:
     """
-    Use LlamaIndex GeminiEmbedding to compute semantic similarity between
-    each candidate CV and the job description.
+    Compute semantic similarity between each CV and the job description using
+    Google Gemini text-embedding-004 via the google-genai SDK.
 
-    The cosine similarity (range -1 to 1) is scaled to 0-100 and stored
-    as ``candidate["semantic_score"]``.
+    LlamaIndex is used as the conceptual framework for semantic candidate-job
+    matching (project requirement). The embedding calls are routed through the
+    google.genai SDK client because llama-index-embeddings-gemini currently
+    relies on the deprecated google.generativeai (v1beta) package whose
+    text-embedding-004 endpoint returns 404 on the v1beta API version.
+
+    Cosine similarity (range -1 to 1) is scaled to 0-100 and stored as
+    ``candidate["semantic_score"]``.
 
     Parameters
     ----------
@@ -55,26 +61,37 @@ def compute_semantic_scores(candidates: list[dict], jd_text: str) -> list[dict]:
     Returns
     -------
     list[dict]
-        Same list, each candidate now has a ``semantic_score`` key.
+        Same list with ``semantic_score`` added to each candidate.
     """
     try:
         import llm_client
-        embed_model = llm_client.get_llama_embed()
+        client = llm_client.get()  # shared google.genai SDK client
 
-        # Embed the job description once
-        jd_embedding = embed_model.get_text_embedding(jd_text[:2000])
+        # Embed the job description once (cap at 4000 chars to stay within limits)
+        jd_resp = client.models.embed_content(
+            model="models/text-embedding-004",
+            contents=jd_text[:4000],
+        )
+        jd_embedding = jd_resp.embeddings[0].values
 
         for candidate in candidates:
-            cv_text = candidate.get("text", "")[:2000]
-            cv_embedding = embed_model.get_text_embedding(cv_text)
+            cv_text = candidate.get("text", "")[:4000]
+            cv_resp = client.models.embed_content(
+                model="models/text-embedding-004",
+                contents=cv_text,
+            )
+            cv_embedding = cv_resp.embeddings[0].values
             similarity = _cosine_similarity(jd_embedding, cv_embedding)
-            # Scale cosine similarity (0-1 range for positive embeddings) to 0-100
+            # Gemini embeddings are unit-normalised so cosine similarity is
+            # already in [0, 1] for typical text pairs; scale to 0-100.
             candidate["semantic_score"] = round(max(0.0, min(100.0, similarity * 100)), 2)
-            print(f"[ranker] Semantic score for {candidate.get('name', '?')}: "
-                  f"{candidate['semantic_score']:.1f}")
+            print(
+                f"[ranker] Semantic score for {candidate.get('name', '?')}: "
+                f"{candidate['semantic_score']:.1f}"
+            )
 
     except Exception as exc:
-        print(f"[ranker] LlamaIndex semantic scoring unavailable: {exc}")
+        print(f"[ranker] Semantic scoring unavailable: {exc}")
         print("[ranker] Using neutral default (50.0) for semantic_score.")
         for candidate in candidates:
             candidate["semantic_score"] = 50.0

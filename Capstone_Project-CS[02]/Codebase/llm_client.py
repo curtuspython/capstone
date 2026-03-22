@@ -114,18 +114,26 @@ def get_llama_embed():
     """
     Return a LlamaIndex GeminiEmbedding instance for semantic matching.
 
-    LlamaIndex is used as the framework for semantic candidate-job matching
-    via vector similarity as required by the project specification.
+    LlamaIndex is used as the semantic matching framework (project requirement).
+    Note: the actual embedding API calls in ranker.py are routed through the
+    google.genai SDK client (get()) because llama-index-embeddings-gemini
+    currently targets the deprecated google.generativeai (v1beta) package,
+    whose text-embedding-004 endpoint returns 404 on the v1beta API version.
+    This method is retained for compatibility and future use once the
+    llama-index-embeddings-gemini package migrates to google.genai.
 
     Returns
     -------
-    GeminiEmbedding
+    GeminiEmbedding or None
     """
     global _llama_embed
     if _llama_embed is None:
-        from llama_index.embeddings.gemini import GeminiEmbedding
-        _llama_embed = GeminiEmbedding(
-            model_name="models/text-embedding-004",
-            api_key=get_api_key(),
-        )
+        try:
+            from llama_index.embeddings.gemini import GeminiEmbedding  # noqa: PLC0415
+            _llama_embed = GeminiEmbedding(
+                model_name="models/text-embedding-004",
+                api_key=get_api_key(),
+            )
+        except Exception as exc:
+            print(f"[llm_client] LlamaIndex embed init skipped: {exc}")
     return _llama_embed
