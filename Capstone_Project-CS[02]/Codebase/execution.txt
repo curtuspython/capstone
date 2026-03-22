@@ -113,11 +113,13 @@
 #       --llm2  gemini-2.5-flash \
 #       --api-key AIzaSy...
 #
-#   Example 3 - Quick test with local sample data:
-#     (test_data/ lives outside the submission zip, not shared per instruction 6c)
-#
+#   Example 3 - Different models for each LLM role:
 #     export GEMINI_API_KEY=AIzaSy...
-#     python main.py --jd ../../test_data/job_description.txt --cvs ../../test_data/cvs/
+#     python main.py \
+#       --jd      job_description.txt \
+#       --cvs     ./resumes/ \
+#       --llm1    gemini-2.5-pro \
+#       --llm2    gemini-2.5-flash
 #
 # ==============================================================================
 # EXPECTED OUTPUT
@@ -130,13 +132,16 @@
 #     [main] Step 3/4 -- Scoring 3 CV(s) with LLM #2 ...
 #     [main] Step 4/4 -- Ranking candidates ...
 #
-#     ========================================================================
-#     Rank  Candidate                   Composite   Overall  Qualified
-#     ------------------------------------------------------------------------
-#     1     alice                            82.3        85  v
-#     2     bob                              61.0        65  v
-#     3     carol                            38.5        42  x
-#     ========================================================================
+#     ========================================================
+#     Rank  Candidate                   Composite   Overall
+#     --------------------------------------------------------
+#     1     alice                            82.3        85
+#     2     bob                              61.0        65
+#     3     carol                            38.5        42
+#     ========================================================
+#
+#   NOTE: A "Qualified" column only appears when --min-score is set
+#   and at least one candidate falls below the threshold.
 #
 #   Two report files are written to --output directory (default: current dir):
 #     cv_ranking_report_<YYYYMMDD_HHMMSS>.txt   ->  Full narrative report

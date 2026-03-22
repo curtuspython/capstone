@@ -31,7 +31,7 @@ Two LLMs are used by default (overridable via --llm1 / --llm2):
     LLM #1  gemini-2.5-flash - deep job-description analysis (runs once)
     LLM #2  gemini-2.5-flash - per-CV scoring against requirements (runs per candidate)
 
-All LLM calls go through the Google Gemini API (free tier).
+All LLM calls go through the Google Gemini API.
 Get a free API key at https://aistudio.google.com/
 """
 
@@ -247,6 +247,8 @@ def main() -> None:
         ranked_candidates=ranked_candidates,
         requirements=requirements,
         output_dir=args.output,
+        llm1=args.llm1,
+        llm2=args.llm2,
     )
 
     print("\n[main] Done! Reports written:")

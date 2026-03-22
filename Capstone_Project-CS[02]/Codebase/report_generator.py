@@ -28,6 +28,8 @@ def generate_report(
     requirements: dict,
     output_dir: str = ".",
     base_name: str = "cv_ranking_report",
+    llm1: str = "gemini-2.5-flash",
+    llm2: str = "gemini-2.5-flash",
 ) -> dict[str, str]:
     """
     Write the ranking report to disk in TXT and CSV formats.
@@ -42,6 +44,10 @@ def generate_report(
         Directory where the report files will be written.
     base_name : str
         Base filename (without extension) for the output files.
+    llm1 : str
+        Name of the model used for JD analysis (LLM #1).
+    llm2 : str
+        Name of the model used for CV scoring (LLM #2).
 
     Returns
     -------
@@ -53,7 +59,7 @@ def generate_report(
     written: dict[str, str] = {}
 
     txt_path = os.path.join(output_dir, f"{base_name}_{timestamp}.txt")
-    _write_txt_report(txt_path, ranked_candidates, requirements)
+    _write_txt_report(txt_path, ranked_candidates, requirements, llm1=llm1, llm2=llm2)
     written["txt"] = txt_path
     print(f"[report_generator] Text report → {txt_path}")
 
@@ -73,6 +79,8 @@ def _write_txt_report(
     path: str,
     ranked_candidates: list[dict],
     requirements: dict,
+    llm1: str = "gemini-2.5-flash",
+    llm2: str = "gemini-2.5-flash",
 ) -> None:
     """Write the full narrative text report."""
     lines: list[str] = []
@@ -158,10 +166,10 @@ def _write_txt_report(
         "SCORING METHODOLOGY",
         thin,
         "This report uses two Large Language Models via the Google Gemini API:",
-        "  LLM #1 (gemini-2.5-flash) — Analyses the job description and",
+        f"  LLM #1 ({llm1}) — Analyses the job description and",
         "           extracts structured requirements (must-have, nice-to-have,",
         "           keywords, minimum experience). Runs once per session.",
-        "  LLM #2 (gemini-2.5-flash) — Evaluates each CV against those requirements",
+        f"  LLM #2 ({llm2}) — Evaluates each CV against those requirements",
         "           and produces dimension-level scores plus narrative feedback.",
         "           Runs once per candidate in a loop.",
         "",

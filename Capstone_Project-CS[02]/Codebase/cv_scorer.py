@@ -14,8 +14,8 @@ For each CV the LLM returns:
   - gaps               : list[str] (top 3 missing areas)
   - recommendation     : str  (1-2 sentence recruiter note)
 
-Both LLM calls use gemini-2.5-flash (the current free-tier model available
-to new API users). They remain architecturally separate: LLM #1 runs once
+Both LLM calls use gemini-2.5-flash (the currently available model).
+They remain architecturally separate: LLM #1 runs once
 for deep JD understanding; LLM #2 runs once per candidate in the scoring loop.
 """
 

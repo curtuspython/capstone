@@ -151,7 +151,7 @@ def build_report() -> None:
     _h2(pdf, "4.1  Tools and Technologies")
     tech_rows = [
         ("Python 3.11+",              "Core language"),
-        ("Google Gemini API",         "Hosted LLM inference (free tier via AI Studio)"),
+        ("Google Gemini API",         "Hosted LLM inference via Google AI Studio"),
         ("gemini-2.5-flash", "LLM #1 -- JD analysis (runs once per session)"),
         ("gemini-2.5-flash", "LLM #2 -- CV scoring (runs once per candidate)"),
         ("pypdf",                     "PDF resume parsing"),
@@ -218,8 +218,8 @@ def build_report() -> None:
         "directly matching skills received overall scores of 85+.",
         "The composite ranking aligned with a human reviewer's judgement "
         "in 4 out of 5 cases.",
-        "Pipeline completes for 5 CVs in under 30 seconds using Gemini's free "
-        "tier, demonstrating practical usability.",
+        "Pipeline completes for 5 CVs in under 30 seconds via the Gemini API, "
+        "demonstrating practical usability.",
         "CSV export enables downstream analysis in Excel or Google Sheets.",
     ]
     for b in bullets_results:
