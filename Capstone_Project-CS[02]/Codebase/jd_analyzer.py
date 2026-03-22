@@ -1,7 +1,7 @@
 """
 jd_analyzer.py
 --------------
-Uses LLM #1 (Google Gemini: gemini-2.5-flash) to extract structured
+Uses LLM #1 (Google Gemini: gemini-2.5-pro) to extract structured
 requirements from a raw job description text.
 
 The LLM parses the job description and returns a JSON object with:
@@ -27,9 +27,10 @@ import llm_client
 # Constants
 # ---------------------------------------------------------------------------
 
-# LLM #1 - gemini-2.5-flash: capable model used for deep JD understanding.
-# Runs only once per session so the higher-capability model is justified.
-JD_MODEL = "gemini-2.5-flash"
+# LLM #1 - gemini-2.5-pro: the most capable Gemini model, used for deep
+# semantic extraction of the job description. Runs only ONCE per session so
+# the higher-capability (and higher-cost) model is fully justified here.
+JD_MODEL = "gemini-2.5-pro"
 
 _SYSTEM_INSTRUCTION = (
     "You are an expert HR consultant and technical recruiter. "

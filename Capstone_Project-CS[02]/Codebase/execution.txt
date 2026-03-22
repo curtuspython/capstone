@@ -8,8 +8,14 @@
 #   score, and writes a detailed TXT + CSV report to disk.
 #
 # TWO LLMs USED:
-#   LLM #1 : gemini-2.5-flash  ->  Analyses the job description once
-#   LLM #2 : gemini-2.5-flash  ->  Scores each candidate CV in a loop
+#   LLM #1 : gemini-2.5-pro    ->  Analyses the job description ONCE (deep semantic extraction)
+#   LLM #2 : gemini-2.5-flash  ->  Scores each candidate CV in a loop (fast, repeated calls)
+#
+#   WHY TWO DIFFERENT MODELS?
+#   gemini-2.5-pro is the most capable Gemini model and is used for the
+#   complex one-time task of extracting structured requirements from the JD.
+#   gemini-2.5-flash is a lighter, faster model suited for the repeated
+#   per-candidate scoring loop where speed matters more than raw capability.
 #
 # SUPPORTED FILE FORMATS:
 #   Job description : .txt  |  .pdf  |  .docx
@@ -22,8 +28,8 @@
 #   Python           : 3.11 or higher (tested on 3.13)
 #
 #   LLM Models (Google Gemini):
-#     LLM #1         : gemini-2.5-flash  (job description analysis)
-#     LLM #2         : gemini-2.5-flash  (per-CV scoring loop)
+#     LLM #1 : gemini-2.5-pro    (job description analysis  — runs once)
+#     LLM #2 : gemini-2.5-flash  (per-CV scoring loop       — runs per candidate)
 #
 #   Python Packages (pinned versions used during development):
 #     google-genai   : 1.68.0   ->  Gemini API client (new SDK)
@@ -108,7 +114,7 @@
 #     --api-key     KEY    Gemini API key (or use env var / .env file)  [OPTIONAL]
 #     --output      DIR    Where to write TXT and CSV reports            [OPTIONAL, default: .]
 #     --min-score   N      Flag candidates scoring below N (0-100)       [OPTIONAL]
-#     --llm1        MODEL  Gemini model for JD analysis                  [OPTIONAL, default: gemini-2.5-flash]
+#     --llm1        MODEL  Gemini model for JD analysis                  [OPTIONAL, default: gemini-2.5-pro]
 #     --llm2        MODEL  Gemini model for CV scoring loop              [OPTIONAL, default: gemini-2.5-flash]
 #
 # ==============================================================================
@@ -125,16 +131,16 @@
 #       --cvs     ./resumes/ \
 #       --output  ./reports/ \
 #       --min-score 50 \
-#       --llm1  gemini-2.5-flash \
+#       --llm1  gemini-2.5-pro \
 #       --llm2  gemini-2.5-flash \
 #       --api-key AIzaSy...
 #
-#   Example 3 - Different models for each LLM role:
+#   Example 3 - Override both models to flash for faster/cheaper runs:
 #     export GEMINI_API_KEY=AIzaSy...
 #     python main.py \
 #       --jd      job_description.txt \
 #       --cvs     ./resumes/ \
-#       --llm1    gemini-2.5-pro \
+#       --llm1    gemini-2.5-flash \
 #       --llm2    gemini-2.5-flash
 #
 # ==============================================================================

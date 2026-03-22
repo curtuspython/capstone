@@ -28,7 +28,7 @@ Examples
     python main.py --jd jd.pdf --cvs ./resumes/ --api-key AIza... --output ./reports/
 
 Two LLMs are used by default (overridable via --llm1 / --llm2):
-    LLM #1  gemini-2.5-flash - deep job-description analysis (runs once)
+    LLM #1  gemini-2.5-pro   - deep job-description analysis (runs once)
     LLM #2  gemini-2.5-flash - per-CV scoring against requirements (runs per candidate)
 
 All LLM calls go through the Google Gemini API.
@@ -86,8 +86,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Minimum composite score threshold 0-100 (flags candidates below threshold)",
     )
     parser.add_argument(
-        "--llm1", default="gemini-2.5-flash", metavar="MODEL",
-        help="Gemini model for JD analysis / LLM #1 (default: gemini-2.5-flash)",
+        "--llm1", default="gemini-2.5-pro", metavar="MODEL",
+        help="Gemini model for JD analysis / LLM #1 (default: gemini-2.5-pro)",
     )
     parser.add_argument(
         "--llm2", default="gemini-2.5-flash", metavar="MODEL",

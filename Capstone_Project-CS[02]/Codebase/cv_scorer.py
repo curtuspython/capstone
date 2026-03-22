@@ -2,7 +2,7 @@
 cv_scorer.py
 ------------
 Uses LLM #2 (Google Gemini: gemini-2.5-flash) to score a single candidate
-CV against the structured job requirements extracted by jd_analyzer.py.
+CV against the structured job requirements extracted by jd_analyzer.py (LLM #1).
 
 For each CV the LLM returns:
   - overall_score      : int  0-100
@@ -14,9 +14,10 @@ For each CV the LLM returns:
   - gaps               : list[str] (top 3 missing areas)
   - recommendation     : str  (1-2 sentence recruiter note)
 
-Both LLM calls use gemini-2.5-flash (the currently available model).
-They remain architecturally separate: LLM #1 runs once
-for deep JD understanding; LLM #2 runs once per candidate in the scoring loop.
+LLM #1 (gemini-2.5-pro)   -- deep semantic JD analysis, runs once per session.
+LLM #2 (gemini-2.5-flash) -- fast per-CV scoring, runs once per candidate.
+Using a heavier model for the complex one-time analysis and a lighter, faster
+model for the repeated scoring loop is a standard two-LLM pipeline pattern.
 """
 
 import json
@@ -30,8 +31,10 @@ import llm_client
 # Constants
 # ---------------------------------------------------------------------------
 
-# LLM #2 - gemini-2.5-flash: same model family as LLM #1 but used in a
-# separate role — per-CV scoring loop. Thinking disabled for fast JSON output.
+# LLM #2 - gemini-2.5-flash: a lighter, faster model used in the per-CV
+# scoring loop. Thinking disabled for fast, deterministic JSON output.
+# Deliberately different from LLM #1 (gemini-2.5-pro): the Pro model handles
+# the complex one-time JD analysis; Flash handles the repeated scoring loop.
 SCORER_MODEL = "gemini-2.5-flash"
 
 _SYSTEM_INSTRUCTION = (
