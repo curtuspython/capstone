@@ -1,7 +1,7 @@
 """
 cv_scorer.py
 ------------
-Uses LLM #2 (Google Gemini: gemini-2.0-flash-lite) to score a single candidate
+Uses LLM #2 (Google Gemini: gemini-2.5-flash) to score a single candidate
 CV against the structured job requirements extracted by jd_analyzer.py.
 
 For each CV the LLM returns:
@@ -14,10 +14,9 @@ For each CV the LLM returns:
   - gaps               : list[str] (top 3 missing areas)
   - recommendation     : str  (1-2 sentence recruiter note)
 
-Using gemini-2.0-flash-lite (lighter/faster) here keeps costs low while still
-providing meaningful per-candidate scoring. The separation from
-jd_analyzer lets us run scoring in a loop without re-running the heavier
-gemini-2.5-flash model for every single CV.
+Both LLM calls use gemini-2.5-flash (the current free-tier model available
+to new API users). They remain architecturally separate: LLM #1 runs once
+for deep JD understanding; LLM #2 runs once per candidate in the scoring loop.
 """
 
 import json
@@ -31,9 +30,9 @@ import llm_client
 # Constants
 # ---------------------------------------------------------------------------
 
-# LLM #2 - gemini-2.0-flash-lite: lightweight, fast model used for the
-# per-CV scoring loop. Keeps latency and cost low across many candidates.
-SCORER_MODEL = "gemini-2.0-flash-lite"
+# LLM #2 - gemini-2.5-flash: same model family as LLM #1 but used in a
+# separate role — per-CV scoring loop. Thinking disabled for fast JSON output.
+SCORER_MODEL = "gemini-2.5-flash"
 
 _SYSTEM_INSTRUCTION = (
     "You are a senior technical recruiter. "
@@ -112,6 +111,7 @@ def score_cv(candidate: dict, requirements: dict) -> dict:
 
     # Call the new google-genai SDK: system_instruction lives in GenerateContentConfig.
     # max_output_tokens raised to 4096 to ensure full JSON scoring output is returned.
+    # thinking_config budget=0 disables chain-of-thought for fast, deterministic JSON.
     response = client.models.generate_content(
         model=SCORER_MODEL,
         contents=prompt,
@@ -119,6 +119,7 @@ def score_cv(candidate: dict, requirements: dict) -> dict:
             system_instruction=_SYSTEM_INSTRUCTION,
             temperature=0.15,
             max_output_tokens=4096,
+            thinking_config=types.ThinkingConfig(thinking_budget=0),
         ),
     )
 

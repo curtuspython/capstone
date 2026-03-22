@@ -97,8 +97,8 @@ def build_report() -> None:
         "leverages two Large Language Models (LLMs) to match candidate profiles "
         "against a given job description. The system uses Google Gemini "
         "gemini-2.5-flash to perform deep semantic extraction of hiring "
-        "criteria from the job description, and gemini-2.0-flash-lite to score each "
-        "candidate across four dimensions: must-have skills, nice-to-have "
+        "criteria from the job description, and gemini-2.5-flash (in a separate "
+        "scoring role) to score each candidate across four dimensions: must-have skills, nice-to-have "
         "qualifications, experience relevance, and keyword presence. Candidates "
         "are ranked by a weighted composite score and the results are exported "
         "as both a human-readable text report and a machine-readable CSV file. "
@@ -152,8 +152,8 @@ def build_report() -> None:
     tech_rows = [
         ("Python 3.11+",              "Core language"),
         ("Google Gemini API",         "Hosted LLM inference (free tier via AI Studio)"),
-        ("gemini-2.5-flash",              "LLM #1 -- JD analysis (capable, runs once)"),
-        ("gemini-2.0-flash-lite",          "LLM #2 -- CV scoring (lightweight, fast loop)"),
+        ("gemini-2.5-flash", "LLM #1 -- JD analysis (runs once per session)"),
+        ("gemini-2.5-flash", "LLM #2 -- CV scoring (runs once per candidate)"),
         ("pypdf",                     "PDF resume parsing"),
         ("python-docx",               "Word (.docx) resume parsing"),
         ("fpdf2",                     "PDF report generation"),
@@ -187,11 +187,10 @@ def build_report() -> None:
         "and a role summary. This step runs once per job opening."
     )
     _body(pdf,
-        "Step 2 -- LLM #2 (gemini-2.0-flash-lite) is invoked once per candidate. It "
-        "receives the structured requirements and the candidate's CV text, and "
-        "returns numeric scores across four dimensions along with strengths, "
-        "gaps, and a recruiter recommendation. A lighter model is intentionally "
-        "used here to keep latency and cost low in the per-CV scoring loop."
+        "Step 2 -- LLM #2 (gemini-2.5-flash) is invoked once per candidate. "
+        "It receives the structured requirements and the candidate's CV text, "
+        "and returns numeric scores across four dimensions along with strengths, "
+        "gaps, and a recruiter recommendation."
     )
 
     _h2(pdf, "4.4  Composite Scoring Formula")

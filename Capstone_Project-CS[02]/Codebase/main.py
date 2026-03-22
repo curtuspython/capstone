@@ -28,8 +28,8 @@ Examples
     python main.py --jd jd.pdf --cvs ./resumes/ --api-key AIza... --output ./reports/
 
 Two LLMs are used:
-    LLM #1  gemini-2.5-flash      - deep job-description analysis
-    LLM #2  gemini-2.0-flash-lite - per-CV scoring against requirements
+    LLM #1  gemini-2.5-flash - deep job-description analysis (runs once)
+    LLM #2  gemini-2.5-flash - per-CV scoring against requirements (runs per candidate)
 
 All LLM calls go through the Google Gemini API (free tier).
 Get a free API key at https://aistudio.google.com/
@@ -168,8 +168,8 @@ def _print_banner() -> None:
 +----------------------------------------------------+
 |  CV Sorting using LLMs -- Capstone Project CS[02]  |
 |                                                    |
-|  LLM #1 : gemini-2.5-flash      (JD analysis)     |
-|  LLM #2 : gemini-2.0-flash-lite (CV scoring)      |
+|  LLM #1 : gemini-2.5-flash  (JD analysis)         |
+|  LLM #2 : gemini-2.5-flash  (CV scoring loop)     |
 |  Provider: Google Gemini API (free tier)           |
 +----------------------------------------------------+
     """
@@ -185,9 +185,9 @@ def main() -> None:
     Orchestrate the full CV sorting pipeline:
       1. Parse CLI arguments.
       2. Resolve and configure Gemini API key.
-      3. Load and analyse the job description (LLM #1 - gemini-2.5-flash).
+      3. Load and analyse the job description (LLM #1 - gemini-2.5-flash, runs once).
       4. Parse all candidate CVs from the given directory.
-      5. Score each CV against the job requirements (LLM #2 - gemini-2.0-flash-lite).
+      5. Score each CV against the job requirements (LLM #2 - gemini-2.5-flash, per-candidate loop).
       6. Rank candidates by composite score.
       7. Print results to terminal and write reports to disk.
     """
@@ -221,8 +221,8 @@ def main() -> None:
         sys.exit(1)
     print(f"[main] {len(candidates)} candidate(s) loaded.")
 
-    # Step 5: Score each CV with LLM #2 (gemini-2.0-flash-lite)
-    print(f"\n[main] Step 3/4 -- Scoring {len(candidates)} CV(s) with LLM #2 (gemini-2.0-flash-lite) ...")
+    # Step 5: Score each CV with LLM #2 (gemini-2.5-flash, per-candidate loop)
+    print(f"\n[main] Step 3/4 -- Scoring {len(candidates)} CV(s) with LLM #2 (gemini-2.5-flash) ...")
     scored_candidates = score_all_cvs(candidates, requirements)
 
     # Step 6: Rank candidates

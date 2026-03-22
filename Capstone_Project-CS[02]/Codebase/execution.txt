@@ -8,8 +8,8 @@
 #   score, and writes a detailed TXT + CSV report to disk.
 #
 # TWO LLMs USED:
-#   LLM #1 : gemini-2.5-flash      ->  Analyses the job description once
-#   LLM #2 : gemini-2.0-flash-lite  ->  Scores each candidate CV in a loop
+#   LLM #1 : gemini-2.5-flash  ->  Analyses the job description once
+#   LLM #2 : gemini-2.5-flash  ->  Scores each candidate CV in a loop
 #
 # SUPPORTED FILE FORMATS:
 #   Job description : .txt  |  .pdf  |  .docx
