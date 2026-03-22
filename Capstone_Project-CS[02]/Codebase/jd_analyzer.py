@@ -89,14 +89,18 @@ def analyze_job_description(jd_text: str) -> dict:
 
     prompt = _USER_PROMPT_TEMPLATE.format(jd_text=jd_text[:8000])  # guard token limit
 
-    # Call the new google-genai SDK: system_instruction lives in GenerateContentConfig
+    # Call the new google-genai SDK: system_instruction lives in GenerateContentConfig.
+    # max_output_tokens raised to 8192: gemini-2.5-flash uses thinking tokens by
+    # default which can starve the actual JSON output at low limits.
+    # thinking_config budget=0 disables chain-of-thought for fast, deterministic JSON.
     response = client.models.generate_content(
         model=JD_MODEL,
         contents=prompt,
         config=types.GenerateContentConfig(
             system_instruction=_SYSTEM_INSTRUCTION,
-            temperature=0.1,       # low temp -> consistent, deterministic output
-            max_output_tokens=1024,
+            temperature=0.1,        # low temp -> consistent, deterministic output
+            max_output_tokens=8192,
+            thinking_config=types.ThinkingConfig(thinking_budget=0),
         ),
     )
 

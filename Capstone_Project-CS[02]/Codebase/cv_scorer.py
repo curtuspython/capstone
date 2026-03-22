@@ -110,14 +110,15 @@ def score_cv(candidate: dict, requirements: dict) -> dict:
         cv_text=cv_text_trunc,
     )
 
-    # Call the new google-genai SDK: system_instruction lives in GenerateContentConfig
+    # Call the new google-genai SDK: system_instruction lives in GenerateContentConfig.
+    # max_output_tokens raised to 4096 to ensure full JSON scoring output is returned.
     response = client.models.generate_content(
         model=SCORER_MODEL,
         contents=prompt,
         config=types.GenerateContentConfig(
             system_instruction=_SYSTEM_INSTRUCTION,
             temperature=0.15,
-            max_output_tokens=768,
+            max_output_tokens=4096,
         ),
     )
 
