@@ -488,7 +488,7 @@ def _cmd_show(ranked: list[dict], arg: str) -> None:
     print(sep)
     print(f"  File           : {candidate.get('file', 'N/A')}")
     print(f"  Composite Score: {candidate.get('composite_score', 'N/A')} / 100")
-    print(f"  Semantic Score : {candidate.get('semantic_score', 'N/A')} / 100  (LlamaIndex)")
+    print(f"  Semantic Score : {candidate.get('semantic_score', 'N/A')} / 100  (LlamaIndex -> Gemini -> TF-IDF)")
     print(f"  Overall (LLM)  : {scores.get('overall_score', 'N/A')} / 100")
     print()
     print(f"  Must-Have      : {scores.get('must_have_score', 'N/A')}")
@@ -505,10 +505,10 @@ def _cmd_show(ranked: list[dict], arg: str) -> None:
     print()
     print(f"  Recruiter Note: {scores.get('recommendation', 'N/A')}")
 
-    # Show spaCy NER structured data if available
+    # Show structured data extracted by pyresparser (Tier 1) / spaCy NER (Tier 2)
     if structured and any(structured.get(k) for k in ["skills", "education", "degree"]):
         print()
-        print("  Structured Profile (spaCy NER):")
+        print("  Structured Profile (pyresparser Tier 1 / spaCy NER Tier 2):")
         if structured.get("skills"):
             print(f"    Skills     : {', '.join(structured['skills'][:15])}")
         if structured.get("education"):

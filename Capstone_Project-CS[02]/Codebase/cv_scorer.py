@@ -59,7 +59,7 @@ Score the following candidate resume against the job requirements.
 Job Requirements (JSON):
 {requirements_json}
 
-Candidate Structured Profile (extracted via spaCy NER):
+Candidate Structured Profile (extracted via pyresparser Tier 1 / spaCy NER Tier 2):
 {structured_data}
 
 Candidate CV (Full Text):
