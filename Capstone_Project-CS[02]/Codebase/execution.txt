@@ -667,4 +667,11 @@
 #     save_report_to_file()  -- writes the same content to a TXT file on disk
 #                               (called only by the interactive 'export' command)
 #
+#   interactive.py
+#     Terminal-based interactive refinement loop (launched via --interactive).
+#     Extracted from main.py to keep main.py under 300 lines (single responsibility).
+#     Public entry point: run_interactive(...) -- blocks until user types 'quit'.
+#     Supported commands: show, filter, reset, min-score, edit-must, edit-nice,
+#     edit-keywords, rescore, rerank, export, help, quit.
+#
 # ==============================================================================

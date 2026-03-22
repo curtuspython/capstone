@@ -40,6 +40,3 @@ spacy>=3.0.0
 # Used when Gemini text-embedding-004 is unavailable (e.g. API quota/version).
 # TF-IDF cosine similarity via scikit-learn produces real per-candidate scores.
 scikit-learn>=1.3.0
-
-# ---- PDF report generation --------------------------------------------------
-fpdf2>=2.8.0
