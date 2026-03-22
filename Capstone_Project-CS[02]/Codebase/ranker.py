@@ -172,10 +172,12 @@ def _try_gemini_embeddings(candidates: list[dict], jd_text: str) -> bool:
                 jd_embedding = resp.embeddings[0].values
                 used_model = model
                 break
-            except Exception:
+            except Exception as model_exc:
+                print(f"[ranker] Tier 2: model '{model}' failed: {model_exc}")
                 continue
 
         if jd_embedding is None:
+            print("[ranker] Tier 2 (Gemini SDK): all model variants failed for JD embedding.")
             return False
 
         print(f"[ranker] Tier 2: Gemini SDK embedding active (model={used_model}).")
@@ -234,7 +236,10 @@ def _try_tfidf_cosine(candidates: list[dict], jd_text: str) -> bool:
         return True
 
     except ImportError:
-        print("[ranker] scikit-learn not installed; Tier 3 unavailable.")
+        print(
+            "[ranker] scikit-learn not installed; Tier 3 (TF-IDF) unavailable.\n"
+            "  Fix: pip install scikit-learn>=1.3.0  (it is listed in requirements.txt)"
+        )
         return False
     except Exception as exc:
         print(f"[ranker] Tier 3 (TF-IDF) error: {exc}")
