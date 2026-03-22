@@ -1,19 +1,24 @@
 """
 report_generator.py
 -------------------
-Generates a detailed human-readable ranking report in two formats:
-  1. Plain-text (.txt)  — always written; terminal-friendly
-  2. CSV          (.csv) — always written; easy to import into Excel / Sheets
+Builds the candidate ranking report and outputs it to the terminal.
 
-The report includes:
-  - Job description summary and extracted requirements
-  - Ranked candidate table with all dimension scores
-  - Per-candidate strengths, gaps, and recruiter recommendation
-  - Scoring methodology explanation
+Output strategy
+---------------
+- During a normal pipeline run the full report is printed directly to
+  the terminal (stdout).  No CSV or TXT files are created automatically.
+- In interactive mode the 'export' command lets the recruiter persist the
+  current (possibly filtered / re-scored) ranking to a TXT file on disk
+  by calling save_report_to_file().
+
+Report sections
+---------------
+  1. Job description summary and extracted requirements
+  2. Ranked candidate table   -- all dimension scores side-by-side
+  3. Per-candidate profiles   -- strengths, gaps, recruiter note
+  4. Scoring methodology      -- weights, LLM choices, fallback chain
 """
 
-import csv
-import json
 import os
 from datetime import datetime
 from pathlib import Path
@@ -23,16 +28,18 @@ from pathlib import Path
 # Public API
 # ---------------------------------------------------------------------------
 
-def generate_report(
+def print_report(
     ranked_candidates: list[dict],
     requirements: dict,
-    output_dir: str = ".",
-    base_name: str = "cv_ranking_report",
     llm1: str = "gemini-2.5-flash",
     llm2: str = "gemini-2.5-pro",
-) -> dict[str, str]:
+) -> None:
     """
-    Write the ranking report to disk in TXT and CSV formats.
+    Print the full ranking report directly to the terminal (stdout).
+
+    This is the primary output method -- no files are written.  The report
+    includes the JD summary, full ranked table, per-candidate detail, and
+    the scoring methodology section.
 
     Parameters
     ----------
@@ -40,114 +47,165 @@ def generate_report(
         Output of ranker.rank_candidates().
     requirements : dict
         Structured JD analysis from jd_analyzer.analyze_job_description().
-    output_dir : str
-        Directory where the report files will be written.
-    base_name : str
-        Base filename (without extension) for the output files.
     llm1 : str
         Name of the model used for JD analysis (LLM #1).
     llm2 : str
         Name of the model used for CV scoring (LLM #2).
+    """
+    lines = _build_report_lines(ranked_candidates, requirements, llm1=llm1, llm2=llm2)
+    print("\n".join(lines))
+
+
+def save_report_to_file(
+    ranked_candidates: list[dict],
+    requirements: dict,
+    output_dir: str = ".",
+    base_name: str = "cv_ranking_report",
+    llm1: str = "gemini-2.5-flash",
+    llm2: str = "gemini-2.5-pro",
+) -> str:
+    """
+    Save the ranking report to a TXT file on disk and return its path.
+
+    Only called by the interactive mode 'export' command -- not during
+    the normal pipeline run.  Useful when the recruiter has refined
+    criteria or filtered candidates and wants to persist the result.
+
+    Parameters
+    ----------
+    ranked_candidates : list[dict]
+        Output of ranker.rank_candidates() (possibly after re-scoring).
+    requirements : dict
+        Current requirements dict (may differ from the original if edited
+        via 'edit-must' / 'edit-nice' / 'edit-keywords' in interactive mode).
+    output_dir : str
+        Directory to write the file in (created if it does not exist).
+    base_name : str
+        Filename prefix; a timestamp is appended automatically.
+    llm1 : str
+        Model name for LLM #1 (shown in the methodology section).
+    llm2 : str
+        Model name for LLM #2 (shown in the methodology section).
 
     Returns
     -------
-    dict[str, str]
-        Mapping from format name to the written file path.
+    str
+        Absolute path to the written TXT file.
     """
     os.makedirs(output_dir, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    written: dict[str, str] = {}
-
     txt_path = os.path.join(output_dir, f"{base_name}_{timestamp}.txt")
-    _write_txt_report(txt_path, ranked_candidates, requirements, llm1=llm1, llm2=llm2)
-    written["txt"] = txt_path
-    print(f"[report_generator] Text report → {txt_path}")
 
-    csv_path = os.path.join(output_dir, f"{base_name}_{timestamp}.csv")
-    _write_csv_report(csv_path, ranked_candidates)
-    written["csv"] = csv_path
-    print(f"[report_generator] CSV report  → {csv_path}")
-
-    return written
+    lines = _build_report_lines(ranked_candidates, requirements, llm1=llm1, llm2=llm2)
+    Path(txt_path).write_text("\n".join(lines), encoding="utf-8")
+    print(f"[report_generator] Report saved to: {txt_path}")
+    return txt_path
 
 
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
 
-def _write_txt_report(
-    path: str,
+def _build_report_lines(
     ranked_candidates: list[dict],
     requirements: dict,
     llm1: str = "gemini-2.5-flash",
     llm2: str = "gemini-2.5-pro",
-) -> None:
-    """Write the full narrative text report."""
+) -> list[str]:
+    """
+    Build the full report as a list of plain-text lines.
+
+    Shared by print_report() and save_report_to_file() so the output is
+    always identical whether it is shown in the terminal or saved to disk.
+
+    Parameters
+    ----------
+    ranked_candidates : list[dict]
+    requirements : dict
+    llm1 : str
+    llm2 : str
+
+    Returns
+    -------
+    list[str]
+        One string per output line (no trailing newlines on individual items).
+    """
     lines: list[str] = []
-    sep = "=" * 72
+    sep  = "=" * 72
     thin = "-" * 72
 
-    # ---- Header ----
+    # ---- Header -------------------------------------------------------
     lines += [
         sep,
-        "  CV SORTING REPORT  —  AI-Powered Candidate Ranking",
-        f"  Generated: {datetime.now().strftime('%d %b %Y %H:%M:%S')}",
+        "  CV SORTING REPORT  --  AI-Powered Candidate Ranking",
+        f"  Generated : {datetime.now().strftime('%d %b %Y  %H:%M:%S')}",
         sep,
         "",
     ]
 
-    # ---- Job summary ----
+    # ---- Job description summary --------------------------------------
     lines += [
         "JOB DESCRIPTION SUMMARY",
         thin,
-        f"Role        : {requirements.get('title', 'N/A')}",
-        f"Min. Exp.   : {requirements.get('experience_min', 0)} year(s)",
-        f"Summary     : {requirements.get('summary', 'N/A')}",
+        f"Role      : {requirements.get('title', 'N/A')}",
+        f"Min. Exp. : {requirements.get('experience_min', 0)} year(s)",
+        f"Summary   : {requirements.get('summary', 'N/A')}",
         "",
         "Must-Have Requirements:",
     ]
     for item in requirements.get("must_have", []):
-        lines.append(f"  • {item}")
+        lines.append(f"  * {item}")
+
     lines.append("")
     lines.append("Nice-to-Have:")
     for item in requirements.get("nice_to_have", []):
-        lines.append(f"  • {item}")
-    lines += ["", "Keywords:  " + ", ".join(requirements.get("keywords", [])), ""]
+        lines.append(f"  * {item}")
 
-    # ---- Ranking table ----
+    lines += [
+        "",
+        "Keywords : " + ", ".join(requirements.get("keywords", [])),
+        "",
+    ]
+
+    # ---- Ranked candidate summary table ------------------------------
     lines += [
         sep,
         "CANDIDATE RANKING SUMMARY",
         thin,
-        f"{'#':<4}{'Candidate':<26}{'Composite':>10}  {'Semantic':>9}  {'MustHave':>9}  "
-        f"{'NiceToHave':>11}  {'Exp':>5}  {'Keyword':>8}  {'Overall':>8}",
+        # Column header
+        f"{'#':<4}{'Candidate':<26}{'Composite':>10}  {'Semantic':>9}  "
+        f"{'MustHave':>9}  {'NiceHave':>9}  {'Exp':>5}  {'Keyword':>8}  {'Overall':>8}",
         thin,
     ]
     for c in ranked_candidates:
         s = c.get("scores", {})
+        # Mark candidates that fall below the min-score threshold
+        flag = "  [below threshold]" if not c.get("qualified", True) else ""
         lines.append(
             f"{c['rank']:<4}{c['name'][:25]:<26}"
             f"{c['composite_score']:>10.1f}  "
-            f"{str(c.get('semantic_score', 'N/A')):>9}  "
+            f"{str(round(c.get('semantic_score', 0), 1)):>9}  "
             f"{_safe_int(s, 'must_have_score'):>9}  "
-            f"{_safe_int(s, 'nice_to_have_score'):>11}  "
+            f"{_safe_int(s, 'nice_to_have_score'):>9}  "
             f"{_safe_int(s, 'experience_score'):>5}  "
             f"{_safe_int(s, 'keyword_score'):>8}  "
             f"{_safe_int(s, 'overall_score'):>8}"
+            f"{flag}"
         )
     lines.append("")
 
-    # ---- Per-candidate detail ----
+    # ---- Per-candidate detail profiles --------------------------------
     lines += [sep, "DETAILED CANDIDATE PROFILES", ""]
     for c in ranked_candidates:
         s = c.get("scores", {})
         lines += [
             thin,
-            f"Rank #{c['rank']}  —  {c['name']}",
-            f"File         : {c.get('file', 'N/A')}",
-            f"Composite    : {c['composite_score']:.1f} / 100",
-            f"Semantic     : {c.get('semantic_score', 'N/A')} / 100  (LlamaIndex -> Gemini -> TF-IDF fallback)",
-            f"Overall (LLM): {s.get('overall_score', 'N/A')} / 100",
+            f"Rank #{c['rank']}  --  {c['name']}",
+            f"File           : {c.get('file', 'N/A')}",
+            f"Composite Score: {c['composite_score']:.1f} / 100",
+            f"Semantic Score : {round(c.get('semantic_score', 0), 1)} / 100  "
+            "(LlamaIndex -> Gemini SDK -> TF-IDF fallback)",
+            f"Overall (LLM)  : {s.get('overall_score', 'N/A')} / 100",
             "",
             "Strengths:",
         ]
@@ -158,74 +216,54 @@ def _write_txt_report(
             lines.append(f"  - {gap}")
         lines += [
             "",
-            f"Recruiter Note: {s.get('recommendation', 'N/A')}",
+            f"Recruiter Note : {s.get('recommendation', 'N/A')}",
             "",
         ]
 
-    # ---- Methodology ----
+    # ---- Scoring methodology ------------------------------------------
     lines += [
         sep,
         "SCORING METHODOLOGY",
         thin,
-        "This report uses two Large Language Models via the Google Gemini API,",
-        "orchestrated by LangChain with LlamaIndex for semantic matching:",
-        f"  LLM #1 ({llm1}) -- Analyses the job description and",
-        "           extracts structured requirements (must-have, nice-to-have,",
-        "           keywords, minimum experience). Uses LangChain chain.",
-        f"  LLM #2 ({llm2}) -- Evaluates each CV against those requirements",
-        "           and produces dimension-level scores plus narrative feedback.",
-        "           Uses LangChain chain. Runs once per candidate.",
-        "  LlamaIndex  -- Tier 1 for semantic similarity (GeminiEmbedding).",
-        "           Falls back to Gemini SDK embeddings (Tier 2) then",
-        "           TF-IDF cosine similarity (Tier 3) if API is unavailable.",
-        "  pyresparser -- Tier 1 for structured resume extraction.",
-        "           Falls back to spaCy 3.x NER + regex (Tier 2) on error.",
+        "Two Large Language Models via the Google Gemini API, orchestrated",
+        "by LangChain with LlamaIndex for semantic matching:",
         "",
-        "Composite score weights:",
-        "  Must-Have      : 35%",
-        "  Semantic Match : 20%  (LlamaIndex)",
-        "  Experience     : 20%",
-        "  Nice-to-Have   : 15%",
-        "  Keyword Match  : 10%",
+        f"  LLM #1 ({llm1})",
+        "    Analyses the job description once and extracts structured",
+        "    requirements (must-have, nice-to-have, keywords, min experience).",
+        "    Uses a LangChain ChatPromptTemplate -> JsonOutputParser chain.",
+        "",
+        f"  LLM #2 ({llm2})",
+        "    Evaluates each CV against those requirements and produces",
+        "    dimension-level scores plus narrative feedback (strengths,",
+        "    gaps, recruiter note).  Uses LangChain chain per candidate.",
+        "",
+        "  Semantic Scoring (4-tier fallback -- first that succeeds wins):",
+        "    Tier 1  LlamaIndex GeminiEmbedding   (cosine similarity)",
+        "    Tier 2  Gemini SDK text-embedding-004 (v1 endpoint, isolated client)",
+        "    Tier 3  TF-IDF cosine similarity      (scikit-learn, local)",
+        "    Tier 4  Neutral default 50.0          (if all above fail)",
+        "    TF-IDF scores are batch-normalised to [10, 100] to match the",
+        "    range of embedding-based scores in the composite formula.",
+        "",
+        "  Resume Extraction (2-tier fallback):",
+        "    Tier 1  pyresparser  (attempted first; may raise E053 on spaCy 3.x)",
+        "    Tier 2  spaCy 3.x NER + regex  (automatic fallback)",
+        "",
+        "  Composite Score Weights (must sum to 100%):",
+        "    Must-Have      35%",
+        "    Semantic Match 20%  (LlamaIndex / TF-IDF fallback)",
+        "    Experience     20%",
+        "    Nice-to-Have   15%",
+        "    Keyword Match  10%",
         sep,
     ]
 
-    Path(path).write_text("\n".join(lines), encoding="utf-8")
-
-
-def _write_csv_report(path: str, ranked_candidates: list[dict]) -> None:
-    """Write a flat CSV report for spreadsheet consumption."""
-    fieldnames = [
-        "rank", "name", "composite_score", "semantic_score",
-        "overall_score", "must_have_score", "nice_to_have_score",
-        "experience_score", "keyword_score",
-        "strengths", "gaps", "recommendation", "file",
-    ]
-
-    with open(path, "w", newline="", encoding="utf-8") as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-        writer.writeheader()
-        for c in ranked_candidates:
-            s = c.get("scores", {})
-            writer.writerow({
-                "rank":               c["rank"],
-                "name":               c["name"],
-                "composite_score":    c["composite_score"],
-                "semantic_score":     c.get("semantic_score", 0),
-                "overall_score":      s.get("overall_score", 0),
-                "must_have_score":    s.get("must_have_score", 0),
-                "nice_to_have_score": s.get("nice_to_have_score", 0),
-                "experience_score":   s.get("experience_score", 0),
-                "keyword_score":      s.get("keyword_score", 0),
-                "strengths":          " | ".join(s.get("strengths", [])),
-                "gaps":               " | ".join(s.get("gaps", [])),
-                "recommendation":     s.get("recommendation", ""),
-                "file":               c.get("file", ""),
-            })
+    return lines
 
 
 def _safe_int(scores: dict, key: str) -> int:
-    """Safely convert a score value to int, defaulting to 0."""
+    """Safely cast a score value to int, returning 0 on any failure."""
     try:
         return int(scores.get(key, 0))
     except (TypeError, ValueError):

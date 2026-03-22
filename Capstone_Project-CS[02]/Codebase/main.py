@@ -203,7 +203,11 @@ def main() -> None:
       4. Parse all candidate CVs from the given directory.
       5. Score each CV against the job requirements (LLM #2, per-candidate loop).
       6. Rank candidates by composite score.
-      7. Print results to terminal and write reports to disk.
+      7. Print compact ranking table to the terminal.
+      8. Print the full narrative report (JD summary, per-candidate profiles,
+         scoring methodology) directly to the terminal.  No files are written.
+      9. Optionally enter interactive mode (--interactive) where the recruiter
+         can filter, re-score, and run 'export' to save a TXT file.
     """
     # Parse args FIRST so the banner can display the actual chosen model names
     parser = _build_parser()
@@ -244,22 +248,19 @@ def main() -> None:
     print("\n[main] Step 4/4 -- Ranking candidates (+ LlamaIndex semantic matching) ...")
     ranked_candidates = rank_candidates(scored_candidates, min_score=args.min_score, jd_text=jd_text)
 
-    # Step 7: Print summary to terminal
+    # Step 7: Print the compact ranking table to the terminal
     print(get_ranking_summary(ranked_candidates))
 
-    # Step 8: Write reports to disk
-    print("\n[main] Writing reports ...")
-    written_files = generate_report(
+    # Step 8: Print the full narrative report directly to the terminal.
+    # No TXT or CSV files are written during a normal pipeline run.
+    # To persist results, launch with --interactive and use the 'export' command.
+    print("\n[main] Full Report:\n")
+    print_report(
         ranked_candidates=ranked_candidates,
         requirements=requirements,
-        output_dir=args.output,
         llm1=args.llm1,
         llm2=args.llm2,
     )
-
-    print("\n[main] Done! Reports written:")
-    for fmt, path in written_files.items():
-        print(f"  [{fmt.upper()}] {path}")
 
     # Step 9: Interactive query refinement mode (if requested)
     if args.interactive:
@@ -291,7 +292,7 @@ _INTERACTIVE_HELP = """
     edit-keywords      Edit keywords (comma-separated)
     rescore            Re-score filtered candidates with current requirements
     rerank             Re-rank (no re-scoring) with current settings
-    export             Write TXT + CSV reports for the current ranking
+    export             Save the current ranking to a TXT file on disk
     help               Show this help message
     quit               Exit interactive mode
 """
@@ -309,20 +310,80 @@ def _interactive_loop(
     """
     Terminal-based interactive refinement loop.
 
-    Allows the recruiter to inspect match explanations, filter by skill,
-    adjust job criteria, and re-run sorting — all from the terminal,
-    with no GUI dependency (rule 8g).
+    Entered automatically after the pipeline finishes when the user passes
+    the ``--interactive`` flag.  Allows the recruiter to drill into results,
+    tweak criteria, and re-run scoring -- all without restarting the script.
+
+    How it works
+    ------------
+    The loop maintains three mutable state variables:
+
+      current_scored   (list[dict])
+        The full scored candidate list produced by cv_scorer.score_all_cvs().
+        Updated in-place when 'rescore' is run.
+
+      current_ranked   (list[dict])
+        The ranked view of current_scored (possibly filtered).  Rebuilt by
+        ranker.rank_candidates() on every command that changes the view.
+
+      current_reqs     (dict)
+        The active requirements dict (title, must_have, nice_to_have,
+        keywords, experience_min, summary).  Starts as a copy of the JD
+        analysis output and can be edited live via 'edit-must', 'edit-nice',
+        and 'edit-keywords'.  Changes only take effect after 'rescore'.
+
+    Command reference
+    -----------------
+    show <rank>     -- Print detailed per-candidate breakdown (scores,
+                       strengths, gaps, recruiter note, structured fields)
+                       for the candidate at the given rank number.
+
+    filter <skill>  -- Narrow the ranking to candidates whose raw CV text
+                       or structured data contains the given skill/keyword
+                       (case-insensitive substring match).  Useful for
+                       quick pass/fail screening on a must-have technology.
+
+    reset           -- Remove the active skill filter and restore the full
+                       ranking from current_scored.
+
+    min-score <N>   -- Set a new minimum composite score threshold.  All
+                       candidates below N are excluded from current_ranked.
+                       Re-applies immediately without re-scoring.
+
+    edit-must       -- Replace the must-have requirements list with a new
+                       comma-separated list entered inline.
+                       Changes are staged; run 'rescore' to apply.
+
+    edit-nice       -- Same as edit-must but for the nice-to-have list.
+
+    edit-keywords   -- Same as edit-must but for the keyword list.
+
+    rescore         -- Re-run LLM #2 (cv_scorer) on all scored candidates
+                       using the current requirements (after any edits).
+                       Expensive: makes one LLM API call per candidate.
+
+    rerank          -- Re-run the ranker with current settings (min-score,
+                       filter) without calling the LLM again.  Fast.
+
+    export          -- Save the current ranking to a TXT file on disk
+                       (written to the directory specified by --output).
+                       This is the only way a file is written by the tool.
+
+    help            -- Print the short command cheatsheet.
+
+    quit / exit / q -- Exit interactive mode and end the program.
     """
     print("\n" + "=" * 60)
     print("  INTERACTIVE MODE")
     print("  Type 'help' for available commands, 'quit' to exit.")
     print("=" * 60)
 
-    current_scored = list(scored_candidates)
-    current_ranked = list(ranked_candidates)
-    current_reqs = dict(requirements)
-    min_score = None
-    active_filter = None
+    # ---- mutable state for this session ----
+    current_scored = list(scored_candidates)   # all candidates, scored by LLM #2
+    current_ranked = list(ranked_candidates)   # current ranked/filtered view
+    current_reqs   = dict(requirements)        # live requirements (editable)
+    min_score      = None                      # composite score floor (float|None)
+
 
     while True:
         try:
@@ -439,17 +500,19 @@ def _interactive_loop(
             print("[interactive] Re-ranked.")
             print(get_ranking_summary(current_ranked))
 
-        # ---- export ----
+        # ---- export : save current ranking to a TXT file on disk ----
+        # This is the only time a file is written by this tool.
+        # Useful after filtering / re-scoring in interactive mode so
+        # the recruiter can persist the refined ranking for later review.
         elif action == "export":
-            written = generate_report(
+            txt_path = save_report_to_file(
                 ranked_candidates=current_ranked,
                 requirements=current_reqs,
                 output_dir=output_dir,
                 llm1=llm1,
                 llm2=llm2,
             )
-            for fmt, path in written.items():
-                print(f"  [{fmt.upper()}] {path}")
+            print(f"[interactive] Report saved → {txt_path}")
 
         else:
             print(f"[interactive] Unknown command: '{action}'. Type 'help' for options.")

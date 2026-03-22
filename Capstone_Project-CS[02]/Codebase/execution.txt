@@ -8,7 +8,9 @@
 #   semantic similarity (Gemini embeddings -> TF-IDF cosine fallback),
 #   extracts structured resume data via pyresparser (Tier 1) with spaCy
 #   3.x NER as the automatic fallback (Tier 2), ranks candidates by a
-#   weighted composite score, and exports results as TXT + CSV reports.
+#   weighted composite score, and prints the full report directly to the
+#   terminal -- no CSV or TXT files are created unless the recruiter runs
+#   'export' inside interactive mode.
 #   Supports an optional terminal-based interactive mode for real-time
 #   query refinement.
 #
@@ -26,7 +28,7 @@
 #                           to outdated config.cfg format). Falls through to Tier 2.
 #   spaCy 3.x (Tier 2)  ->  Automatic fallback for structured resume extraction
 #                           via NER + regex. Compatible with Python 3.11+.
-#   scikit-learn        ->  TF-IDF cosine similarity as semantic scoring Tier 2
+#   scikit-learn        ->  TF-IDF cosine similarity as semantic scoring Tier 3
 #                           (used when Gemini text-embedding-004 returns 404).
 #   --interactive mode  ->  Terminal-based query refinement (no GUI required)
 #
@@ -122,32 +124,128 @@
 #     python main.py --jd <path_to_job_description> --cvs <path_to_cv_directory>
 #
 #   FULL USAGE (all options):
-#     python main.py \n#       --jd        <path_to_job_description_file>   \n#       --cvs       <path_to_cv_directory>           \n#       --output    <output_directory>               \n#       --min-score <0-100>                          \n#       --llm1      <gemini_model_for_jd_analysis>   \n#       --llm2      <gemini_model_for_cv_scoring>    \n#       --api-key   <GEMINI_API_KEY>                 \n#       --interactive
+#     python main.py \
+#       --jd        <path_to_job_description_file>   \
+#       --cvs       <path_to_cv_directory>           \
+#       --output    <output_directory>               \
+#       --min-score <0-100>                          \
+#       --llm1      <gemini_model_for_jd_analysis>   \
+#       --llm2      <gemini_model_for_cv_scoring>    \
+#       --api-key   <GEMINI_API_KEY>                 \
+#       --interactive
 #
 #   ARGUMENTS:
 #     --jd          PATH   Job description file (.txt / .pdf / .docx)  [REQUIRED]
 #     --cvs         PATH   Directory containing candidate CVs           [REQUIRED]
 #     --api-key     KEY    Gemini API key (or use env var / .env file)  [OPTIONAL]
-#     --output      DIR    Where to write TXT and CSV reports            [OPTIONAL, default: .]
-#     --min-score   N      Flag candidates scoring below N (0-100)       [OPTIONAL]
-#     --llm1        MODEL  Gemini model for JD analysis                  [OPTIONAL, default: gemini-2.5-flash]
-#     --llm2        MODEL  Gemini model for CV scoring loop              [OPTIONAL, default: gemini-2.5-pro]
-#     --interactive        Enter interactive mode after ranking           [OPTIONAL]
+#     --output      DIR    Directory for 'export' in interactive mode   [OPTIONAL, default: .]
+#     --min-score   N      Flag candidates scoring below N (0-100)      [OPTIONAL]
+#     --llm1        MODEL  Gemini model for JD analysis                 [OPTIONAL, default: gemini-2.5-flash]
+#     --llm2        MODEL  Gemini model for CV scoring loop             [OPTIONAL, default: gemini-2.5-pro]
+#     --interactive        Enter interactive mode after ranking          [OPTIONAL]
 #
-#   INTERACTIVE MODE (--interactive):
-#   ----------------------------------
-#   After ranking, enter a command loop for real-time refinement:
-#     show <rank>         Inspect match explanation for a ranked candidate
-#     filter <skill>      Keep only candidates whose CV mentions a skill
-#     reset               Remove all filters and show full ranking
-#     min-score <N>       Set minimum composite score threshold
-#     edit-must <csv>     Edit must-have requirements (comma-separated)
-#     edit-nice <csv>     Edit nice-to-have requirements (comma-separated)
-#     edit-keywords <csv> Edit keywords (comma-separated)
-#     rescore             Re-score candidates with updated requirements
-#     rerank              Re-rank without re-scoring
-#     export              Write TXT + CSV reports for current ranking
-#     help / quit         Show help or exit interactive mode
+# ==============================================================================
+# INTERACTIVE MODE  (--interactive)
+# ==============================================================================
+#
+#   Overview
+#   --------
+#   After the 4-step pipeline finishes and the report is printed, passing
+#   --interactive keeps the program alive and drops into a command prompt:
+#
+#     [interactive] >
+#
+#   The recruiter can then explore, filter, and refine the results without
+#   re-running the entire pipeline.  Three internal state objects drive the
+#   loop:
+#
+#     current_scored  -- all candidates with LLM scores (mutable)
+#     current_ranked  -- the current filtered/ranked view (rebuilt on each cmd)
+#     current_reqs    -- the live requirements dict (editable inline)
+#
+#   Commands
+#   --------
+#
+#   show <rank>
+#     Print the detailed breakdown for the candidate at position <rank>.
+#     Shows dimension scores (must-have, nice-to-have, experience, keyword,
+#     semantic), strengths (+), gaps (-), recruiter recommendation, and
+#     the structured profile fields extracted by spaCy NER (email, skills,
+#     education, years of experience).
+#
+#     Example:
+#       [interactive] > show 1
+#
+#   filter <skill>
+#     Narrow the ranking to candidates whose raw CV text or structured
+#     data contains <skill> (case-insensitive substring match).  Useful
+#     for quickly screening on a mandatory technology or certification.
+#     After filtering, the compact ranking table is reprinted.
+#
+#     Example:
+#       [interactive] > filter kubernetes
+#       [interactive] Filtered to 3 candidate(s) matching 'kubernetes'.
+#       ... (ranking table reprinted for filtered set)
+#
+#   reset
+#     Remove the active skill filter and restore the full ranking from
+#     current_scored (respects current min-score if set).
+#
+#   min-score <N>
+#     Change the minimum composite score threshold on the fly.  Candidates
+#     below N are excluded from current_ranked and marked [below threshold]
+#     in the table.  Does NOT re-score -- applies immediately.
+#
+#     Example:
+#       [interactive] > min-score 80
+#
+#   edit-must <skill1, skill2, ...>
+#     Replace the must-have requirements list with the comma-separated
+#     values entered inline.  Changes are staged but do not affect scores
+#     until you run 'rescore'.
+#
+#     Example:
+#       [interactive] > edit-must Python, FastAPI, PostgreSQL, Docker
+#
+#   edit-nice <skill1, skill2, ...>
+#     Same as edit-must but for the nice-to-have list.
+#
+#   edit-keywords <kw1, kw2, ...>
+#     Same as edit-must but for the keyword list used by LLM #2 for
+#     keyword-match scoring.
+#
+#   rescore
+#     Re-run LLM #2 (gemini-2.5-pro) on ALL scored candidates using the
+#     current requirements (after any edits via edit-must / edit-nice /
+#     edit-keywords).  This is the expensive command -- it makes one
+#     Gemini API call per candidate.  After re-scoring, current_ranked
+#     is rebuilt and the updated table is shown.
+#
+#   rerank
+#     Rebuild current_ranked from current_scored without calling the LLM.
+#     Use this after changing min-score or filter when no re-scoring is
+#     needed.  Fast (no API calls).
+#
+#   export
+#     Save the CURRENT ranking (including any filters / re-scoring applied
+#     during this session) to a TXT file on disk.  The file is written to
+#     the directory specified by --output (default: current directory).
+#     This is the ONLY way this tool writes any file -- the normal pipeline
+#     run prints everything to the terminal and creates no files.
+#
+#     The filename is:
+#       cv_ranking_report_<YYYYMMDD_HHMMSS>.txt
+#
+#     Example:
+#       [interactive] > export
+#       [report_generator] Report saved to: ./reports/cv_ranking_report_20260322_200214.txt
+#       [interactive] Report saved -> ./reports/cv_ranking_report_20260322_200214.txt
+#
+#   help
+#     Print the short command cheatsheet.
+#
+#   quit  /  exit  /  q
+#     Exit interactive mode and end the program.
 #
 # ==============================================================================
 # EXAMPLE COMMANDS
@@ -157,47 +255,94 @@
 #     export GEMINI_API_KEY=AIzaSy...
 #     python main.py --jd job_description.txt --cvs ./resumes/
 #
-#   Example 2 - Full options:
-#     python main.py \n#       --jd        job_description.txt \n#       --cvs       ./resumes/ \n#       --output    ./reports/ \n#       --min-score 70 \n#       --llm1  gemini-2.5-flash \n#       --llm2  gemini-2.5-pro \n#       --api-key AIzaSy...
+#   Example 2 - Full options with min-score filter:
+#     python main.py \
+#       --jd        job_description.txt \
+#       --cvs       ./resumes/ \
+#       --output    ./reports/ \
+#       --min-score 70 \
+#       --llm1  gemini-2.5-flash \
+#       --llm2  gemini-2.5-pro \
+#       --api-key AIzaSy...
 #
-#   Example 3 - Interactive terminal mode:
+#   Example 3 - Interactive mode (refine, then export to file):
 #     export GEMINI_API_KEY=AIzaSy...
-#     python main.py --jd job_description.txt --cvs ./resumes/ --interactive
+#     python main.py \
+#       --jd job_description.txt \
+#       --cvs ./resumes/ \
+#       --output ./reports/ \
+#       --interactive
+#
+#     Then inside interactive mode:
+#       [interactive] > filter python
+#       [interactive] > min-score 75
+#       [interactive] > show 1
+#       [interactive] > export
+#       [interactive] > quit
 #
 # ==============================================================================
-# EXPECTED OUTPUT
+# EXPECTED TERMINAL OUTPUT  (normal run, no --interactive)
 # ==============================================================================
 #
-#   [main] Step 1/4 -- Analysing job description with LLM #1 (gemini-2.5-flash) ...
-#   [resume_parser] pyresparser unavailable (OSError: [E053] ...) -- using spaCy 3.x NER fallback.
-#   [main] Step 2/4 -- Parsing candidate CVs ...
-#   [main] Step 3/4 -- Scoring 6 CV(s) with LLM #2 (gemini-2.5-pro) ...
-#   [ranker] Tier 1 (Gemini embedding) failed -- trying Tier 2 (TF-IDF cosine similarity).
-#   [ranker] Semantic (TF-IDF) -- cv_frank: 84.2
-#   [ranker] Semantic (TF-IDF) -- cv_alice: 81.9
+#   +----------------------------------------------------+
+#   | CV Sorting using LLMs -- Capstone Project CS[02]  |
+#   |                                                    |
+#   |   LLM #1 : gemini-2.5-flash                       |
+#   |   LLM #2 : gemini-2.5-pro                         |
+#   |   Provider: Google Gemini API                      |
+#   +----------------------------------------------------+
+#   [main] Google Gemini API configured.
+#   [main] Loading job description from: job_description.txt
+#   [main] Step 1/4 -- Analysing job description with LLM #1 ...
+#   [main] Step 2/4 -- Parsing candidate CVs from: ./resumes/
+#   [main] Step 3/4 -- Scoring 6 CV(s) with LLM #2 ...
+#   [main] Step 4/4 -- Ranking candidates (+ LlamaIndex semantic matching) ...
+#
+#   [ranker] Semantic (TF-IDF, normalised) -- Frank Osei:      97.5
+#   [ranker] Semantic (TF-IDF, normalised) -- Alice Johnson:   96.8
 #   ...
 #
 #   ==============================================================================
-#   Rank  Candidate               Composite  Semantic   Overall
+#   Rank  Candidate         Composite  Semantic  Overall  Qualified
 #   ------------------------------------------------------------------------------
-#   1     cv_frank                     91.3      84.2        99     (qualified)
-#   2     cv_alice                     89.8      81.9        99
-#   3     cv_david                     78.5      72.3        90
-#   ...
+#   1     Frank Osei            97.9     97.5      99      YES
+#   2     Alice Johnson         95.4     96.8      98      YES
+#   3     David Chen            89.7    100.0      90      borderline
+#   4     Carol Martinez        55.4     71.8      58      NO
+#   5     Emily Rodriguez       13.0     24.8      12      NO
+#   6     Bob Smith              6.0     10.0       5      NO
 #   ==============================================================================
 #
-#   Two report files written to --output directory:
-#     cv_ranking_report_<YYYYMMDD_HHMMSS>.txt   ->  Full narrative report
-#     cv_ranking_report_<YYYYMMDD_HHMMSS>.csv   ->  Spreadsheet-ready export
+#   [main] Full Report:
+#
+#   ========================================================================
+#     CV SORTING REPORT  --  AI-Powered Candidate Ranking
+#     Generated : 22 Mar 2026  20:02:14
+#   ========================================================================
+#   JOB DESCRIPTION SUMMARY
+#   ------------------------------------------------------------------------
+#   Role      : Senior Python Backend Developer
+#   Min. Exp. : 5 year(s)
+#   ...
+#   (full report continues -- JD summary, candidate table, per-candidate
+#    profiles with strengths/gaps/recruiter notes, and methodology section)
+#   ========================================================================
+#
+#   NOTE: No files are written.  To save a copy, run with --interactive
+#   and use the 'export' command after reviewing the terminal output.
 #
 # ==============================================================================
 # SYSTEM ARCHITECTURE
 # ==============================================================================
 #
 #   main.py              ->  CLI entry point; orchestrates the 4-step pipeline;
-#                             includes --interactive mode for query refinement
-#   llm_client.py        ->  Centralised Gemini client initialisation
-#                             (google-genai SDK, LangChain, LlamaIndex wrappers)
+#                             prints full report to terminal; interactive mode
+#   llm_client.py        ->  Centralised Gemini client initialisation:
+#                             - default genai.Client (v1beta) for generate_content
+#                             - embed genai.Client (v1) for embed_content
+#                               (isolated to bypass LlamaIndex v1beta contamination)
+#                             - LangChain ChatGoogleGenerativeAI (cached per config)
+#                             - LlamaIndex GeminiEmbedding wrapper
 #   resume_parser.py     ->  Two-tier resume extraction:
 #                             Tier 1: pyresparser (project requirement)
 #                             Tier 2: spaCy 3.x NER + regex (automatic fallback)
@@ -207,11 +352,15 @@
 #                             keywords, min experience, role summary)
 #   cv_scorer.py         ->  LLM #2 (gemini-2.5-pro) via LangChain chain
 #                             -- per-CV scoring on 4 dimensions + explanation
-#   ranker.py            ->  Semantic scoring (three-tier fallback):
-#                             Tier 1: Gemini text-embedding-004 cosine similarity
-#                             Tier 2: TF-IDF cosine similarity (scikit-learn)
-#                             Tier 3: neutral default 50.0
-#                             + weighted composite score computation + ranking
-#   report_generator.py  ->  Writes TXT + CSV reports to disk
+#   ranker.py            ->  Semantic scoring (4-tier fallback):
+#                             Tier 1: LlamaIndex GeminiEmbedding cosine similarity
+#                             Tier 2: Gemini SDK text-embedding-004 (v1 endpoint)
+#                             Tier 3: TF-IDF cosine similarity (scikit-learn,
+#                                     batch-normalised to [10, 100])
+#                             Tier 4: neutral default 50.0
+#                             + weighted composite score + ranking
+#   report_generator.py  ->  Builds report lines; print_report() outputs to
+#                             terminal; save_report_to_file() writes TXT on
+#                             explicit 'export' in interactive mode only
 #
 # ==============================================================================
